@@ -1,18 +1,18 @@
 import shutil
-
+import pandas as pd
 import numpy as np
 
 from abides_core import Kernel
-from abides_core.utils import subdict
-from abides_markets.configs.rmsc04 import build_config as build_config_rmsc04
+from abides_core.utils import subdict, parse_logs_df
+# from abides_markets.configs.rmsc04 import build_config as build_config_rmsc04
+from abides_markets.configs.prmsc1 import build_config as build_config_prmsc1
 
 
-def test_rmsc04():
-    config = build_config_rmsc04(
+def test_prmsc1():
+    config = build_config_prmsc1(
         seed=1,
         book_logging=False,
-        end_time="10:00:00",
-        log_orders=False,
+        log_orders=True,
         exchange_log_orders=False,
     )
 
@@ -26,16 +26,25 @@ def test_rmsc04():
             [
                 "start_time",
                 "stop_time",
+                "swap_interval",
                 "agents",
                 "agent_latency_model",
                 "default_computation_delay",
-                "custom_properties",
+                "custom_properties"
             ],
         ),
         skip_log=True,
     )
 
-    kernel.run()
+    end_state = kernel.run()
+
+    df = parse_logs_df(end_state)
+    # Convert the DataFrame to Markdown format
+    df_markdown = df.to_markdown(index=False)
+
+    # Save the Markdown string to a text file
+    with open('log/test_log.txt', 'w') as f:
+        f.write(df_markdown)
 
     shutil.rmtree("log/__test_logs")
     ## just checking simulation runs without crashing and reaches the assert

@@ -2,6 +2,8 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 from ..price_level import PriceLevel
 
+import numpy as np
+
 
 ################## STATE MANIPULATION ###############################
 def list_dict_flip(ld: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
@@ -211,3 +213,16 @@ def get_imbalance(
         return bid_vol / (bid_vol + ask_vol)
     else:
         return ask_vol / (bid_vol + ask_vol)
+    
+# PENDLE
+def tick_to_rate(tick_index: int) -> float:
+    if tick_index >= 0:
+        return (1.0001)**tick_index - 1
+    else:
+        return 1 - (1.0001)**(-tick_index)
+
+def rate_to_tick(rate: float) -> int:
+    if rate >= 0:
+        return int(round(np.log(1+rate)/np.log(1.0001)))
+    else:
+        return - int(round(np.log(1-rate)/np.log(1.0001)))

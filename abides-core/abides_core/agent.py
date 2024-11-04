@@ -89,6 +89,7 @@ class Agent:
         """
 
         self.kernel = kernel
+        self.rate_oracle = self.kernel.rate_oracle
 
         logger.debug("{} exists!".format(self.name))
 
@@ -136,7 +137,7 @@ class Agent:
         # and request that the Kernel write it to disk before terminating.
         if self.log and self.log_to_file:
             df_log = pd.DataFrame(self.log, columns=("EventTime", "EventType", "Event"))
-            df_log.set_index("EventTime", inplace=True)
+            # df_log.set_index("EventTime", inplace=True)
             self.write_log(df_log)
 
     ### Methods for internal use by agents (e.g. bookkeeping).
@@ -313,7 +314,7 @@ class Agent:
             sender_id=self.id, requested_delay=requested_delay
         )
 
-    def delay(self, additional_delay: int) -> None:
+    def delay(self, additional_delay: NanosecondTime) -> None:
         """
         Accumulates a temporary delay for the current wake cycle for this agent.
 

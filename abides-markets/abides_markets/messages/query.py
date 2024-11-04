@@ -2,7 +2,7 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from abides_core import Message
+from abides_core import Message, NanosecondTime
 
 
 @dataclass
@@ -69,7 +69,7 @@ class QueryOrderStreamResponseMsg(QueryResponseMsg):
 class QueryTransactedVolMsg(QueryMsg):
     # Inherited Fields:
     # symbol: str
-    lookback_period: str
+    lookback_period: NanosecondTime
 
 
 @dataclass

@@ -27,3 +27,6 @@ def test_str_to_ns():
     assert str_to_ns("00:00:01") == 1e9
     assert str_to_ns("00:01:00") == 1e9 * 60
     assert str_to_ns("01:00:00") == 1e9 * 60 * 60
+
+    assert str_to_ns("1D") == 1e9 * 60 * 60 * 24
+    assert str_to_ns("1W") == 1e9 * 60 * 60 * 24 * 7

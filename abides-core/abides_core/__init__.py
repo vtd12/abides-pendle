@@ -5,3 +5,4 @@ from .agent import Agent
 from .kernel import Kernel
 from .latency_model import LatencyModel
 from .message import Message, MessageBatch
+from .rate_oracle import RateOracle

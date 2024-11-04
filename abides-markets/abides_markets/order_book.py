@@ -69,8 +69,8 @@ class OrderBook:
 
         self.last_update_ts: Optional[NanosecondTime] = self.owner.mkt_open
 
-        self.buy_transactions: List[Tuple[NanosecondTime, int]] = []
-        self.sell_transactions: List[Tuple[NanosecondTime, int]] = []
+        self.buy_transactions: List[Tuple[NanosecondTime, int, int]] = []
+        self.sell_transactions: List[Tuple[NanosecondTime, int, int]] = []
 
     def handle_limit_order(self, order: LimitOrder, quiet: bool = False) -> None:
         """Matches a limit order or adds it to the order book.
@@ -98,9 +98,9 @@ class OrderBook:
             )
             return
 
-        if (order.limit_price < 0) or (int(order.limit_price) != order.limit_price):
+        if int(order.limit_price) != order.limit_price:
             warnings.warn(
-                f"{order.symbol} order discarded. Limit price ({order.limit_price}) must be a positive integer."
+                f"{order.symbol} order discarded. Limit price ({order.limit_price}) must be a integer."
             )
             return
 
@@ -274,11 +274,11 @@ class OrderBook:
 
             if order.side.is_bid():
                 self.buy_transactions.append(
-                    (self.owner.current_time, matched_order.quantity)
+                    (self.owner.current_time, matched_order.fill_price, matched_order.quantity)
                 )
             else:
                 self.sell_transactions.append(
-                    (self.owner.current_time, matched_order.quantity)
+                    (self.owner.current_time, matched_order.fill_price, matched_order.quantity)
                 )
 
             self.history.append(
@@ -648,7 +648,7 @@ class OrderBook:
         index = 0
         while not self.bids[index].total_quantity > 0:
             index += 1
-        return self.bids[0].price, self.bids[0].total_quantity
+        return self.bids[index].price, self.bids[index].total_quantity
 
     def get_l1_ask_data(self) -> Optional[Tuple[int, int]]:
         """Returns the current best ask price of the book and the volume at this price."""
@@ -750,7 +750,7 @@ class OrderBook:
             for price_level in self.asks[:depth]
         ]
 
-    def get_transacted_volume(self, lookback_period: str = "10min") -> Tuple[int, int]:
+    def get_transacted_volume(self, lookback_period: NanosecondTime = str_to_ns("10min")) -> Tuple[int, int]:
         """Method retrieves the total transacted volume for a symbol over a lookback
         period finishing at the current simulation time.
 
@@ -759,24 +759,69 @@ class OrderBook:
                 transacted volume for.
         """
 
-        window_start = self.owner.current_time - str_to_ns(lookback_period)
+        window_start = self.owner.current_time - lookback_period
 
         buy_transacted_volume = 0
         sell_transacted_volume = 0
 
-        for time, volume in reversed(self.buy_transactions):
+        for time, price, volume in reversed(self.buy_transactions):
             if time < window_start:
                 break
 
             buy_transacted_volume += volume
 
-        for time, volume in reversed(self.sell_transactions):
+        for time, price, volume in reversed(self.sell_transactions):
             if time < window_start:
                 break
 
             sell_transacted_volume += volume
 
         return (buy_transacted_volume, sell_transacted_volume)
+    
+    def get_twap(self, lookback_period: NanosecondTime = str_to_ns("1h")) -> float:
+        """
+        Method retrieves the twap mid price for a symbol over a lookback
+        period finishing at the current simulation time.
+
+        Arguments:
+            lookback_period: The period in time from the current time to calculate the
+                transacted volume for.
+        """
+
+        block_time = str_to_ns("15s")
+        num_block = int(lookback_period/block_time) + 1
+        num_price = num_block
+
+        sum = 0
+
+        for i in range(num_block):
+            last_block_time = self.owner.current_time - i * block_time
+            last_sell_time = None
+            last_buy_time = None
+
+            for time, price, volume in reversed(self.buy_transactions):
+                if time <= last_block_time:
+                    last_buy_time, last_buy_price = time, price
+                    break
+
+            for time, price, volume in reversed(self.sell_transactions):
+                if time <= last_block_time:
+                    last_sell_time, last_sell_price = time, price
+                    break
+
+            if last_buy_time and last_sell_time:
+                sum += last_buy_price if last_buy_time > last_sell_time else last_sell_price
+            elif last_buy_time:
+                sum += last_buy_price
+            elif last_sell_time:
+                sum += last_sell_price
+            else:  # No transaction query at this time
+                num_price -= 1
+            
+        twap = sum/num_price
+        self.owner.last_twap = twap
+
+        return twap
 
     def get_imbalance(self) -> Tuple[float, Optional[Side]]:
         """Returns a measure of book side total volume imbalance.
@@ -951,14 +996,8 @@ class OrderBook:
         assert self.last_trade is not None
 
         book = "{} order book as of {}\n".format(self.symbol, self.owner.current_time)
-        book += "Last trades: simulated {:d}, historical {:d}\n".format(
-            self.last_trade,
-            self.owner.oracle.observe_price(
-                self.symbol,
-                self.owner.current_time,
-                sigma_n=0,
-                random_state=self.owner.random_state,
-            ),
+        book += "Last trades: {:d}\n".format(
+            self.last_trade
         )
 
         book += "{:10s}{:10s}{:10s}\n".format("BID", "PRICE", "ASK")

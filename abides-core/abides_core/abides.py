@@ -44,6 +44,7 @@ def run(
             [
                 "start_time",
                 "stop_time",
+                "swap_interval",
                 "agents",
                 "agent_latency_model",
                 "default_computation_delay",

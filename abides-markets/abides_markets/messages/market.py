@@ -53,7 +53,7 @@ class MarketClosePriceRequestMsg(Message):
 class MarketClosePriceMsg(Message):
     """
     This message is sent by an ``ExchangeAgent`` when the exchange closes to all agents
-    that habve requested this message. The value is used to accurately calculate the
+    that have requested this message. The value is used to accurately calculate the
     agent's final mark-to-market value.
 
     Attributes:

@@ -3,6 +3,7 @@ from typing import List, Tuple
 from abides_core import Message
 from abides_markets.order_book import OrderBook
 from abides_markets.orders import LimitOrder, Side
+from abides_markets.rate_oracle import ConstantOracle
 
 
 SYMBOL = "X"
@@ -16,6 +17,7 @@ class FakeExchangeAgent:
         self.mkt_open = TIME
         self.book_logging = None
         self.stream_history = 10
+        self.pen_oracle = ConstantOracle(const_rate=0.10, starting_market_rate=0.10)
 
     def reset(self):
         self.messages = []

@@ -52,27 +52,28 @@ def get_wake_time(open_time, close_time, a=0, b=1):
 
     For details on U-quadtratic distribution see https://en.wikipedia.org/wiki/U-quadratic_distribution.
     """
+    return open_time + (close_time - open_time) * np.random.rand()
 
-    def cubic_pow(n: float) -> float:
-        """Helper function: returns *real* cube root of a float."""
+    # def cubic_pow(n: float) -> float:
+    #     """Helper function: returns *real* cube root of a float."""
 
-        if n < 0:
-            return -((-n) ** (1.0 / 3.0))
-        else:
-            return n ** (1.0 / 3.0)
+    #     if n < 0:
+    #         return -((-n) ** (1.0 / 3.0))
+    #     else:
+    #         return n ** (1.0 / 3.0)
 
-    #  Use inverse transform sampling to obtain variable sampled from U-quadratic
-    def u_quadratic_inverse_cdf(y):
-        alpha = 12 / ((b - a) ** 3)
-        beta = (b + a) / 2
-        result = cubic_pow((3 / alpha) * y - (beta - a) ** 3) + beta
-        return result
+    # #  Use inverse transform sampling to obtain variable sampled from U-quadratic
+    # def u_quadratic_inverse_cdf(y):
+    #     alpha = 12 / ((b - a) ** 3)
+    #     beta = (b + a) / 2
+    #     result = cubic_pow((3 / alpha) * y - (beta - a) ** 3) + beta
+    #     return result
 
-    uniform_0_1 = np.random.rand()
-    random_multiplier = u_quadratic_inverse_cdf(uniform_0_1)
-    wake_time = open_time + random_multiplier * (close_time - open_time)
+    # uniform_0_1 = np.random.rand()
+    # random_multiplier = u_quadratic_inverse_cdf(uniform_0_1)
+    # wake_time = open_time + random_multiplier * (close_time - open_time)
 
-    return wake_time
+    # return wake_time
 
 
 def fmt_ts(timestamp: NanosecondTime) -> str:
@@ -130,7 +131,7 @@ def parse_logs_df(end_state: dict) -> pd.DataFrame:
         messages = []
         for m in agent.log:
             m = {
-                "EventTime": m[0] if isinstance(m[0], (int, np.int64)) else 0,
+                "EventTime": fmt_ts(m[0]),
                 "EventType": m[1],
                 "Event": m[2],
             }
@@ -152,7 +153,7 @@ def parse_logs_df(end_state: dict) -> pd.DataFrame:
             messages.append(m)
         dfs.append(pd.DataFrame(messages))
 
-    return pd.concat(dfs)
+    return pd.concat(dfs).sort_values(by='EventTime')
 
 
 # caching utils: not used by abides but useful to have
@@ -207,3 +208,13 @@ def cache_wrapper(
             return result
 
     return inner
+
+# Pendle
+def merge_swap(s1, f1, s2, f2):
+        s = s1 + s2
+        if s == 0:
+            p_merge_pa = s1 * (f2 - f1)
+            return 0, 0, p_merge_pa
+        f = (s1 * f1 + s2 * f2)/(s1 + s2)
+        
+        return s, f, 0

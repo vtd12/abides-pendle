@@ -229,9 +229,8 @@ class AdaptiveMarketMakerAgent(TradingAgent):
         self, current_time: NanosecondTime, sender_id: int, message: Message
     ) -> None:
         """Processes message from exchange.
-
         Main function is to update orders in orderbook relative to mid-price.
-
+        
         Arguments:
             current_time: Simulation current time.
             message: Message received by self from ExchangeAgent.

@@ -52,3 +52,19 @@ class WakeupMsg(Message):
     """
 
     pass
+
+@dataclass
+class SwapMsg(Message):
+    """
+    Empty message sent to agents when they need to swap based on their position.
+    """
+
+    pass
+
+@dataclass
+class UpdateRateMsg(Message):
+    """
+    Empty message sent to agents when they need to swap based on their position.
+    """
+
+    pass

@@ -241,7 +241,7 @@ class SparseMeanRevertingOracle(MeanRevertingOracle):
         )
 
         open_price = self.symbols[symbol]["r_bar"]
-        logger.debug("Oracle: market open price was was {}".format(open_price))
+        logger.debug("Oracle: market open price was {}".format(open_price))
 
         return open_price
 

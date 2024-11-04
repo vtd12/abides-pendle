@@ -1,5 +1,6 @@
 import datetime as dt
 import logging
+import queue
 import warnings
 from abc import ABC
 from collections import defaultdict
@@ -210,6 +211,12 @@ class ExchangeAgent(FinancialAgent):
         # (this is most likely all agents)
         self.market_close_price_subscriptions: List[int] = []
 
+        # A single mid price queue to keep track of the nearest mid prices to calculate the TWAP
+        self.mid_prices: queue.PriorityQueue[float] = queue.PriorityQueue()
+
+        # The exchange keeps track of the last twap calculated, this value is updated everytime the twap is updated
+        self.last_twap = None
+
     def kernel_initializing(self, kernel: "Kernel") -> None:
         """
         The exchange agent overrides this to obtain a reference to an oracle.
@@ -226,21 +233,19 @@ class ExchangeAgent(FinancialAgent):
 
         assert self.kernel is not None
 
-        self.oracle = self.kernel.oracle
-
-        # Obtain opening prices (in integer cents).  These are not noisy right now.
-        for symbol in self.order_books:
-            try:
-                self.order_books[symbol].last_trade = self.oracle.get_daily_open_price(
-                    symbol, self.mkt_open
-                )
-                logger.debug(
-                    "Opening price for {} is {}".format(
-                        symbol, self.order_books[symbol].last_trade
-                    )
-                )
-            except AttributeError as e:
-                logger.debug(str(e))
+        # # Obtain opening prices.  These are not noisy right now.
+        # for symbol in self.order_books:
+        #     try:
+        #         self.order_books[symbol].last_trade = self.pen_oracle.get_daily_open_price(
+        #             symbol, self.mkt_open
+        #         )
+        #         logger.debug(
+        #             "Opening price for {} is {}".format(
+        #                 symbol, self.order_books[symbol].last_trade
+        #             )
+        #         )
+        #     except AttributeError as e:
+        #         logger.debug(str(e))
 
         # Set a wakeup for the market close so we can send market close price messages.
         self.set_wakeup(self.mkt_close)
@@ -254,15 +259,14 @@ class ExchangeAgent(FinancialAgent):
         super().kernel_terminating()
         # print(self.order_books['ABM'].book_log2)
         # If the oracle supports writing the fundamental value series for its
-        bid_volume, ask_volume = self.order_books["ABM"].get_transacted_volume(
-            self.current_time - self.mkt_open
-        )
-        self.total_exchanged_volume = bid_volume + ask_volume
 
         # symbols, write them to disk.
         for symbol in self.symbols:
             self.analyse_order_book(symbol)
-        for symbol in self.symbols:
+            bid_volume, ask_volume = self.order_books[symbol].get_transacted_volume(
+            self.current_time - self.mkt_open
+            )
+            self.total_exchanged_volume = bid_volume + ask_volume
             bid_volume, ask_volume = self.order_books[symbol].get_transacted_volume(
                 self.current_time - self.mkt_open
             )
@@ -275,16 +279,6 @@ class ExchangeAgent(FinancialAgent):
 
         if self.log_orders == None:
             return
-
-        # If the oracle supports writing the fundamental value series for its
-        # symbols, write them to disk.
-        if hasattr(self.oracle, "f_log"):
-            for symbol in self.oracle.f_log:
-                dfFund = pd.DataFrame(self.oracle.f_log[symbol])
-                if not dfFund.empty:
-                    dfFund.set_index("FundamentalTime", inplace=True)
-                    self.write_log(dfFund, filename="fundamental_{}".format(symbol))
-                    logger.debug("Fundamental archival complete.")
 
     def wakeup(self, current_time: NanosecondTime):
         super().wakeup(current_time)
@@ -299,7 +293,7 @@ class ExchangeAgent(FinancialAgent):
             for agent in self.market_close_price_subscriptions:
                 self.send_message(agent, message)
 
-    def receive_message(
+    def receive_message( 
         self, current_time: NanosecondTime, sender_id: int, message: Message
     ) -> None:
         """
@@ -677,7 +671,7 @@ class ExchangeAgent(FinancialAgent):
                 )
                 self.publish_order_book_data()
 
-    def publish_order_book_data(self) -> None:
+    def publish_order_book_data(self) -> None: 
         """
         The exchange agents sends an order book update to the agents using the
         subscription API if one of the following conditions are met:
@@ -731,19 +725,6 @@ class ExchangeAgent(FinancialAgent):
             asks = book.get_l2_ask_data(data_sub.depth)
             messages.append(
                 L2DataMsg(
-                    symbol,
-                    book.last_trade,
-                    self.current_time,
-                    bids,
-                    asks,
-                )
-            )
-
-        elif isinstance(data_sub, self.L3DataSubscription):
-            bids = book.get_l3_bid_data(data_sub.depth)
-            asks = book.get_l3_ask_data(data_sub.depth)
-            messages.append(
-                L3DataMsg(
                     symbol,
                     book.last_trade,
                     self.current_time,
@@ -942,3 +923,6 @@ class ExchangeAgent(FinancialAgent):
             pct_time_no_liquidity_asks=100 * T_null_asks / total_time,
             pct_time_no_liquidity_bids=100 * T_null_bids / total_time,
         )
+
+        
+        

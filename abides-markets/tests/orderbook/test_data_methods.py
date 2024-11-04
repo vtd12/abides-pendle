@@ -1,5 +1,7 @@
 from abides_markets.orders import MarketOrder, Side
 
+from abides_core.utils import str_to_ns
+
 from . import setup_book_with_orders, SYMBOL, TIME
 
 # fmt: off
@@ -125,6 +127,51 @@ def test_get_transacted_volume():
         book.handle_market_order(order)
 
     assert book.get_transacted_volume() == (sum([10, 30, 20, 10]), sum([50, 10, 40]))
+
+def test_get_twap():
+    book, agent, _ = setup_book_with_orders(
+        bids=[
+            (100, [40, 10]),
+            (200, [10, 30, 20, 10]),
+        ],
+        asks=[
+            (300, [10, 50, 20]),
+            (400, [40, 10]),
+            (500, [20]),
+        ],
+    )
+
+    time_now = TIME
+    time_now += str_to_ns("15s")
+    agent.current_time = time_now
+    for q in [10, 30, 20, 10]:
+        order = MarketOrder(
+            agent_id=1,
+            time_placed=time_now,
+            symbol=SYMBOL,
+            quantity=q,
+            side=Side.BID,
+        )
+
+        book.handle_market_order(order)
+
+    assert book.get_twap() == 300
+
+    time_now += str_to_ns("15s")
+    agent.current_time = time_now
+
+    for q in [50, 10, 10]:
+        order = MarketOrder(
+            agent_id=1,
+            time_placed=time_now,
+            symbol=SYMBOL,
+            quantity=q,
+            side=Side.ASK,
+        )
+
+        book.handle_market_order(order)
+
+    assert book.get_twap() == 250
 
 
 def test_get_imbalance():

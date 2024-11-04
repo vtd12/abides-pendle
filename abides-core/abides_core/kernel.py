@@ -9,9 +9,13 @@ import pandas as pd
 
 from . import NanosecondTime
 from .agent import Agent
-from .message import Message, MessageBatch, WakeupMsg
+from .message import Message, MessageBatch, WakeupMsg, SwapMsg, UpdateRateMsg
 from .latency_model import LatencyModel
 from .utils import fmt_ts, str_to_ns
+
+# PENDLE
+from .rate_oracle import RateOracle
+# END PENDLE
 
 
 logger = logging.getLogger(__name__)
@@ -41,8 +45,11 @@ class Kernel:
     def __init__(
         self,
         agents: List[Agent],
-        start_time: NanosecondTime = str_to_ns("09:30:00"),
-        stop_time: NanosecondTime = str_to_ns("16:00:00"),
+        # PENDLE
+        swap_interval: NanosecondTime = str_to_ns("8h"),
+        # END PENDLE
+        start_time: NanosecondTime = str_to_ns("00:00:00"),
+        stop_time: NanosecondTime = str_to_ns("23:00:00"),
         default_computation_delay: int = 1,
         default_latency: float = 1,
         agent_latency: Optional[List[List[float]]] = None,
@@ -90,22 +97,10 @@ class Kernel:
         # agents must be a list of agents for the simulation,
         #        based on class agent.Agent
         self.agents: List[Agent] = agents
-
-        # Filter for any ABIDES-Gym agents - does not require dependency on ABIDES-gym.
-        self.gym_agents: List[Agent] = list(
-            filter(
-                lambda agent: "CoreGymAgent"
-                in [c.__name__ for c in agent.__class__.__bases__],
-                agents,
-            )
-        )
-
-        # Temporary check until ABIDES-gym supports multiple gym agents
-        assert (
-            len(self.gym_agents) <= 1
-        ), "ABIDES-gym currently only supports using one gym agent"
-
-        logger.debug(f"Detected {len(self.gym_agents)} ABIDES-gym agents")
+        try: 
+            self.book = agents[0].order_books["PEN"]
+        except:
+            logger.info("No exchange detected!")
 
         # Simulation custom state in a freeform dictionary.  Allows config files
         # that drive multiple simulations, or require the ability to generate
@@ -118,6 +113,12 @@ class Kernel:
         # the simulation, separate from anything like exchange open/close).
         self.start_time: NanosecondTime = start_time
         self.stop_time: NanosecondTime = stop_time
+
+        # PENDLE
+        self.swap_interval: NanosecondTime = swap_interval  # The interval between each swap
+        self.rate_normalizer: float = self.swap_interval/(365*str_to_ns("1d"))  # The normalizer for the payment, since rate is annualized
+        
+        # END PENDLE
 
         # This is a NanosecondTime that includes the date.
         self.current_time: NanosecondTime = start_time
@@ -187,7 +188,7 @@ class Kernel:
         # staggering of sent messages.
         self.current_agent_additional_delay: int = 0
 
-        self.show_trace_messages: bool = False
+        self.show_trace_messages: bool = True
 
         logger.debug(f"Kernel initialized")
 
@@ -219,8 +220,7 @@ class Kernel:
           - Calls on the kernel_initializing and KernelStarting of the different agents
         """
 
-        logger.debug("Kernel started")
-        logger.debug("Simulation started!")
+        logger.info(f"Simulation started at {fmt_ts(self.current_time)}!")
 
         # Note that num_simulations has not yet been really used or tested
         # for anything.  Instead we have been running multiple simulations
@@ -272,6 +272,18 @@ class Kernel:
         self.event_queue_wall_clock_start = datetime.now()
         self.ttl_messages = 0
 
+        # PENDLE: 
+        # Push message of swaps into message list
+        mkt_open, mkt_close = self.agents[0].mkt_open, self.agents[0].mkt_close
+        swap_time = mkt_open + self.swap_interval
+
+        while swap_time <= mkt_close:
+            for agent in self.agents[1:]:  # Only swap with trading agents
+                self.messages.put((swap_time, (-1, agent.id, SwapMsg())))
+            swap_time += self.swap_interval
+
+        # END PENDLE
+
     def runner(
         self, agent_actions: Optional[Tuple[Agent, List[Dict[str, Any]]]] = None
     ) -> Dict[str, Any]:
@@ -309,7 +321,7 @@ class Kernel:
             sender_id, recipient_id, message = event
 
             # Periodically print the simulation time and total messages, even if muted.
-            if self.ttl_messages % 100000 == 0:
+            if self.ttl_messages % 1_000_000 == 0:
                 logger.info(
                     "--- Simulation time: {}, messages processed: {:,}, wallclock elapsed: {:.2f}s ---".format(
                         fmt_ts(self.current_time),
@@ -379,6 +391,56 @@ class Kernel:
                 # catch kernel interruption signal and return wakeup_result which is the raw state from gym agent
                 if wakeup_result != None:
                     return {"done": False, "result": wakeup_result}
+
+            # PENDLE: Detect Swap Msg
+            elif isinstance(message, SwapMsg):
+                # Test to see if the agent is already in the future.  If so,
+                # delay the swap until the agent can act again.
+                if self.agent_current_times[recipient_id] > self.current_time:
+                    # Push the wakeup call back into the PQ with a new time.
+                    self.messages.put(
+                        (
+                            self.agent_current_times[recipient_id],
+                            (sender_id, recipient_id, message),
+                        )
+                    )
+                    if self.show_trace_messages:
+                        logger.debug(
+                            "After swap return, agent {} delayed from {} to {}".format(
+                                recipient_id,
+                                fmt_ts(self.current_time),
+                                fmt_ts(self.agent_current_times[recipient_id]),
+                            )
+                        )
+                    continue
+
+                # Set agent's current time to global current time for start
+                # of processing.
+                self.agent_current_times[recipient_id] = self.current_time
+
+                # Swap the agent and get value passed to kernel to listen for kernel interruption signal
+                swap_result = self.agents[recipient_id].swap(self.current_time, self.rate_oracle.get_floating_rate(self.current_time))
+
+                # Delay the agent by its computation delay plus any transient additional delay requested.
+                self.agent_current_times[recipient_id] += (
+                    self.agent_computation_delays[recipient_id]
+                    + self.current_agent_additional_delay
+                )
+
+                if self.show_trace_messages:
+                    logger.debug(
+                        "After swap return, agent {} delayed from {} to {}".format(
+                            recipient_id,
+                            fmt_ts(self.current_time),
+                            fmt_ts(self.agent_current_times[recipient_id]),
+                        )
+                    )
+                # catch kernel interruption signal and return swap_result
+                if swap_result != None:
+                    return {"done": False, "result": swap_result}
+                
+            # END PENDLE
+            
             else:
                 # Test to see if the agent is already in the future.  If so,
                 # delay the message until the agent can act again.
@@ -429,17 +491,12 @@ class Kernel:
                     )
 
         if self.messages.empty():
-            logger.debug("--- Kernel Event Queue empty ---")
+            logger.info("--- Kernel Event Queue empty ---")
 
         if self.current_time and (self.current_time > self.stop_time):
-            logger.debug("--- Kernel Stop Time surpassed ---")
+            logger.info(f"--- Kernel Stop Time {self.stop_time} surpassed ---")
 
-        # if gets here means sim queue is fully processed, return to show sim is done
-        if len(self.gym_agents) > 0:
-            self.gym_agents[0].update_raw_state()
-            return {"done": True, "result": self.gym_agents[0].get_raw_state()}
-        else:
-            return {"done": True, "result": None}
+        return {"done": True, "result": None}
 
     def terminate(self) -> Dict[str, Any]:
         """
@@ -504,9 +561,9 @@ class Kernel:
         for a in self.mean_result_by_agent_type:
             value = self.mean_result_by_agent_type[a]
             count = self.agent_count_by_type[a]
-            logger.info(f"{a}: {int(round(value / count)):d}")
+            logger.info(f"{a}: {value / count}")
 
-        logger.info("Simulation ending!")
+        logger.info(f"Simulation ended at {fmt_ts(self.current_time)}!")
 
         return self.custom_state
 
@@ -698,7 +755,7 @@ class Kernel:
 
         self.agent_computation_delays[sender_id] = requested_delay
 
-    def delay_agent(self, sender_id: int, additional_delay: int) -> None:
+    def delay_agent(self, sender_id: int, additional_delay: NanosecondTime) -> None:
         """
         Called by an agent to accumulate temporary delay for the current wake cycle.
 
@@ -711,14 +768,6 @@ class Kernel:
             sender_id: The ID of the agent making the call.
             additional_delay: additional delay given in nanoseconds.
         """
-
-        # additional_delay should be in whole nanoseconds.
-        if not isinstance(additional_delay, int):
-            raise ValueError(
-                "Additional delay must be whole nanoseconds.",
-                "additional_delay:",
-                additional_delay,
-            )
 
         # additional_delay must be non-negative.
         if additional_delay < 0:
@@ -775,14 +824,14 @@ class Kernel:
         path = os.path.join(".", "log", self.log_dir)
 
         if filename:
-            file = "{}.bz2".format(filename)
+            file = "{}".format(filename)
         else:
-            file = "{}.bz2".format(self.agents[sender_id].name.replace(" ", ""))
+            file = "{}".format(self.agents[sender_id].name.replace(" ", ""))
 
         if not os.path.exists(path):
             os.makedirs(path)
 
-        df_log.to_pickle(os.path.join(path, file), compression="bz2")
+        df_log.to_pickle(os.path.join(path, file))
 
     def append_summary_log(self, sender_id: int, event_type: str, event: Any) -> None:
         """

@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 import numpy as np
 
 from abides_core import Message, NanosecondTime
-from abides_core.utils import fmt_ts
+from abides_core.utils import fmt_ts, merge_swap, str_to_ns
 
 from ..messages.market import (
     MarketClosePriceRequestMsg,
@@ -46,6 +46,7 @@ from ..messages.query import (
 from ..orders import Order, LimitOrder, MarketOrder, Side
 from .financial_agent import FinancialAgent
 from .exchange_agent import ExchangeAgent
+from .utils import tick_to_rate, rate_to_tick
 
 
 logger = logging.getLogger(__name__)
@@ -68,8 +69,11 @@ class TradingAgent(FinancialAgent):
         name: Optional[str] = None,
         type: Optional[str] = None,
         random_state: Optional[np.random.RandomState] = None,
-        starting_cash: int = 100000,
+        symbol: str = "PEN",
         log_orders: bool = False,
+        collateral: float = 100_000,
+        pos_size: float = 0,
+        pos_fixrate: float = 0,
     ) -> None:
         # Base class init.
         super().__init__(id, name, type, random_state)
@@ -77,6 +81,8 @@ class TradingAgent(FinancialAgent):
         # We don't yet know when the exchange opens or closes.
         self.mkt_open: Optional[NanosecondTime] = None
         self.mkt_close: Optional[NanosecondTime] = None
+
+        self.symbol = symbol
 
         # Log order activity?
         self.log_orders: bool = log_orders
@@ -86,22 +92,22 @@ class TradingAgent(FinancialAgent):
             self.log_orders = False
             self.log_to_file = False
 
-        # Store starting_cash in case we want to refer to it for performance stats.
-        # It should NOT be modified.  Use the 'CASH' key in self.holdings.
-        # 'CASH' is always in cents!  Note that agents are limited by their starting
-        # cash, currently without leverage.  Taking short positions is permitted,
-        # but does NOT increase the amount of at-risk capital allowed.
-        self.starting_cash: int = starting_cash
+        self.starting_collateral: float = collateral
+
+        # PENDLE
+        self.position: Dict[str, float] = {"COLLATERAL": collateral,
+                                         "SIZE": pos_size,
+                                         "FIXRATE":pos_fixrate}
+        self.pen_orders: Dict[int, Order] = {}
+        # END PENDLE
 
         # TradingAgent has constants to support simulated market orders.
         self.MKT_BUY = sys.maxsize
         self.MKT_SELL = 0
 
-        # The base TradingAgent will track its holdings and outstanding orders.
-        # Holdings is a dictionary of symbol -> shares.  CASH is a special symbol
-        # worth one cent per share.  Orders is a dictionary of active, open orders
+        # The base TradingAgent will track its position and outstanding orders.
+        # Orders is a dictionary of active, open orders
         # (not cancelled, not fully executed) keyed by order_id.
-        self.holdings: Dict[str, int] = {"CASH": starting_cash}
         self.orders: Dict[int, Order] = {}
 
         # The base TradingAgent also tracks last known prices for every symbol
@@ -111,6 +117,8 @@ class TradingAgent(FinancialAgent):
         # automatically generate such requests, though it has a helper function
         # that can be used to make it happen.
         self.last_trade: Dict[str, int] = {}
+
+        self.last_twap: Optional[float] = None
 
         # used in subscription mode to record the timestamp for which the data was current in the ExchangeAgent
         self.exchange_ts: Dict[str, NanosecondTime] = {}
@@ -159,7 +167,7 @@ class TradingAgent(FinancialAgent):
         assert self.kernel is not None
 
         # self.kernel is set in Agent.kernel_initializing()
-        self.logEvent("STARTING_CASH", self.starting_cash, True)
+        self.logEvent("STARTING_COLLATERAL", self.starting_collateral, True)
 
         # Find an exchange with which we can place orders.  It is guaranteed
         # to exist by now (if there is one).
@@ -178,26 +186,14 @@ class TradingAgent(FinancialAgent):
 
         assert self.kernel is not None
 
-        # Print end of day holdings.
-        self.logEvent(
-            "FINAL_HOLDINGS", self.fmt_holdings(self.holdings), deepcopy_event=False
-        )
-        self.logEvent("FINAL_CASH_POSITION", self.holdings["CASH"], True)
-
-        # Mark to market.
-        cash = self.mark_to_market(self.holdings)
-
-        self.logEvent("ENDING_CASH", cash, True)
-        logger.debug(
-            "Final holdings for {}: {}. Marked to market: {}".format(
-                self.name, self.fmt_holdings(self.holdings), cash
-            )
-        )
+        # Print end of day position.
+        self.logEvent("FINAL_COLLATERAL", self.position["COLLATERAL"], True)
 
         # Record final results for presentation/debugging.  This is an ugly way
         # to do this, but it is useful for now.
         mytype = self.type
-        gain = cash - self.starting_cash
+        gain = self.position["COLLATERAL"] - self.starting_collateral
+        self.logEvent("FINAL_VALUATION", gain/self.starting_collateral, True)
 
         if mytype in self.kernel.mean_result_by_agent_type:
             self.kernel.mean_result_by_agent_type[mytype] += gain
@@ -222,8 +218,8 @@ class TradingAgent(FinancialAgent):
         super().wakeup(current_time)
 
         if self.first_wake:
-            # Log initial holdings.
-            self.logEvent("HOLDINGS_UPDATED", self.holdings)
+            # Log initial POSITION.
+            self.logEvent("POSITION_UPDATED", str(self.position))
             self.first_wake = False
 
             # Tell the exchange we want to be sent the final prices when the market closes.
@@ -414,7 +410,7 @@ class TradingAgent(FinancialAgent):
         self.send_message(self.exchange_id, QueryOrderStreamMsg(symbol, length))
 
     def get_transacted_volume(
-        self, symbol: str, lookback_period: str = "10min"
+        self, symbol: str, lookback_period: NanosecondTime = str_to_ns("10min")
     ) -> None:
         """
         Used by any trading agent subclass to query the total transacted volume in a
@@ -440,11 +436,10 @@ class TradingAgent(FinancialAgent):
         is_price_to_comply: bool = False,
         insert_by_id: bool = False,
         is_post_only: bool = False,
-        ignore_risk: bool = True,
         tag: Any = None,
     ) -> LimitOrder:
         """
-        Used by any Trading Agent subclass to create a limit order.
+        Used by any Trading Agent subclass to create a limit order. Check open margin here.
 
         Arguments:
             symbol: A valid symbol.
@@ -476,31 +471,26 @@ class TradingAgent(FinancialAgent):
             tag=tag,
         )
 
-        if quantity > 0:
+        if quantity != 0:
             # Test if this order can be permitted given our at-risk limits.
-            new_holdings = self.holdings.copy()
+            new_position = self.position.copy()
 
-            q = order.quantity if order.side.is_bid() else -order.quantity
+            order_rate = tick_to_rate(order.limit_price)
+            qty = order.quantity if order.side.is_bid() else -1 * order.quantity
 
-            if order.symbol in new_holdings:
-                new_holdings[order.symbol] += q
-            else:
-                new_holdings[order.symbol] = q
+            new_position["SIZE"], new_position["FIXRATE"], _ = merge_swap(new_position["SIZE"], new_position["FIXRATE"], 
+                                                                        qty, order_rate)
+            
 
-            # If at_risk is lower, always allow.  Otherwise, new_at_risk must be below starting cash.
-            if not ignore_risk:
-                # Compute before and after at-risk capital.
-                at_risk = self.mark_to_market(self.holdings) - self.holdings["CASH"]
-                new_at_risk = self.mark_to_market(new_holdings) - new_holdings["CASH"]
-
-                if (new_at_risk > at_risk) and (new_at_risk > self.starting_cash):
-                    logger.debug(
-                        "TradingAgent ignored limit order due to at-risk constraints: {}\n{}".format(
-                            order, self.fmt_holdings(self.holdings)
-                        )
-                    )
-                    return
-
+            # TODO: Check open margin for limit order
+            # if self.mark_to_market(new_position) < 0:
+            #     logger.debug(
+            #         "TradingAgent ignored limit order due to at-risk constraints: {}\n{}".format(
+            #             order, self.position
+            #         )
+            #     )
+            #     return
+                
             return order
 
         else:
@@ -517,7 +507,6 @@ class TradingAgent(FinancialAgent):
         is_price_to_comply: bool = False,
         insert_by_id: bool = False,
         is_post_only: bool = False,
-        ignore_risk: bool = True,
         tag: Any = None,
     ) -> None:
         """
@@ -548,7 +537,6 @@ class TradingAgent(FinancialAgent):
             is_price_to_comply,
             insert_by_id,
             is_post_only,
-            ignore_risk,
             tag,
         )
 
@@ -557,7 +545,9 @@ class TradingAgent(FinancialAgent):
             self.send_message(self.exchange_id, LimitOrderMsg(order))
 
             if self.log_orders:
-                self.logEvent("ORDER_SUBMITTED", order.to_dict(), deepcopy_event=False)
+                self.logEvent("ORDER_SUBMITTED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
     def place_market_order(
         self,
@@ -587,31 +577,14 @@ class TradingAgent(FinancialAgent):
         order = MarketOrder(
             self.id, self.current_time, symbol, quantity, side, order_id, tag
         )
-        if quantity > 0:
-            # compute new holdings
-            new_holdings = self.holdings.copy()
-            q = order.quantity if order.side.is_bid() else -order.quantity
-            if order.symbol in new_holdings:
-                new_holdings[order.symbol] += q
-            else:
-                new_holdings[order.symbol] = q
-
-            if not ignore_risk:
-                # Compute before and after at-risk capital.
-                at_risk = self.mark_to_market(self.holdings) - self.holdings["CASH"]
-                new_at_risk = self.mark_to_market(new_holdings) - new_holdings["CASH"]
-
-                if (new_at_risk > at_risk) and (new_at_risk > self.starting_cash):
-                    logger.debug(
-                        "TradingAgent ignored market order due to at-risk constraints: {}\n{}".format(
-                            order, self.fmt_holdings(self.holdings)
-                        )
-                    )
-                    return
+        if quantity != 0:
+            # TODO: Check margin for market order
             self.orders[order.order_id] = deepcopy(order)
             self.send_message(self.exchange_id, MarketOrderMsg(order))
             if self.log_orders:
-                self.logEvent("ORDER_SUBMITTED", order.to_dict(), deepcopy_event=False)
+                self.logEvent("ORDER_SUBMITTED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
         else:
             warnings.warn(
@@ -647,7 +620,9 @@ class TradingAgent(FinancialAgent):
             self.orders[order.order_id] = deepcopy(order)
 
             if self.log_orders:
-                self.logEvent("ORDER_SUBMITTED", order.to_dict(), deepcopy_event=False)
+                self.logEvent("ORDER_SUBMITTED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
         if len(messages) > 0:
             self.send_message_batch(self.exchange_id, messages)
@@ -669,7 +644,9 @@ class TradingAgent(FinancialAgent):
         if isinstance(order, LimitOrder):
             self.send_message(self.exchange_id, CancelOrderMsg(order, tag, metadata))
             if self.log_orders:
-                self.logEvent("CANCEL_SUBMITTED", order.to_dict(), deepcopy_event=False)
+                self.logEvent("CANCEL_SUBMITTED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
         else:
             warnings.warn(f"Order {order} of type, {type(order)} cannot be cancelled")
 
@@ -705,7 +682,9 @@ class TradingAgent(FinancialAgent):
         )
 
         if self.log_orders:
-            self.logEvent("CANCEL_PARTIAL_ORDER", order.to_dict(), deepcopy_event=False)
+            self.logEvent("CANCEL_PARTIAL_ORDER", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
     def modify_order(self, order: LimitOrder, new_order: LimitOrder) -> None:
         """
@@ -723,7 +702,9 @@ class TradingAgent(FinancialAgent):
         self.send_message(self.exchange_id, ModifyOrderMsg(order, new_order))
 
         if self.log_orders:
-            self.logEvent("MODIFY_ORDER", order.to_dict(), deepcopy_event=False)
+            self.logEvent("MODIFY_ORDER",
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
     def replace_order(self, order: LimitOrder, new_order: LimitOrder) -> None:
         """
@@ -741,7 +722,9 @@ class TradingAgent(FinancialAgent):
         self.send_message(self.exchange_id, ReplaceOrderMsg(self.id, order, new_order))
 
         if self.log_orders:
-            self.logEvent("REPLACE_ORDER", order.to_dict(), deepcopy_event=False)
+            self.logEvent("REPLACE_ORDER", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
     def order_executed(self, order: Order) -> None:
         """
@@ -757,22 +740,16 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"Received notification of execution for: {order}")
 
         if self.log_orders:
-            self.logEvent("ORDER_EXECUTED", order.to_dict(), deepcopy_event=False)
+            self.logEvent("ORDER_EXECUTED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
-        # At the very least, we must update CASH and holdings at execution time.
+        # At the very least, we must update position at execution time.
         qty = order.quantity if order.side.is_bid() else -1 * order.quantity
-        sym = order.symbol
 
-        if sym in self.holdings:
-            self.holdings[sym] += qty
-        else:
-            self.holdings[sym] = qty
-
-        if self.holdings[sym] == 0:
-            del self.holdings[sym]
-
-        # As with everything else, CASH holdings are in CENTS.
-        self.holdings["CASH"] -= qty * order.fill_price
+        self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"], 
+                                                                     qty, tick_to_rate(order.fill_price))
+        self.position["COLLATERAL"] += p_merge_pa
 
         # If this original order is now fully executed, remove it from the open orders list.
         # Otherwise, decrement by the quantity filled just now.  It is _possible_ that due
@@ -791,7 +768,28 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order execution, agent open orders: {self.orders}")
 
-        self.logEvent("HOLDINGS_UPDATED", self.holdings)
+        self.logEvent("POSITION_UPDATED", str(self.position))
+
+    # PENDLE
+    def swap(self, current_time: NanosecondTime, floating_rate: float):
+        """
+        PENDLE: Used periodically swap with the exchange based on pos_size and pos_fixrate 
+
+        Arguments:
+            current_time: The time that this agent was notified to do the swap
+            floating_rate: The rate (typically from Pendle Oracle) user need to pay in exchange for the pos_fixrate
+
+        Returns:
+            
+        """
+        self.current_time = current_time
+
+        self.position["COLLATERAL"] += self.position["SIZE"]*(floating_rate - self.position["FIXRATE"]*self.kernel.rate_normalizer)
+        self.logEvent("SWAP", 
+                      f"{self.position['COLLATERAL']} @ ({floating_rate} - {self.position['FIXRATE']} * {self.kernel.rate_normalizer})", 
+                      deepcopy_event=False)
+        return
+    # END PENDLE
 
     def order_accepted(self, order: LimitOrder) -> None:
         """
@@ -806,7 +804,9 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"Received notification of acceptance for: {order}")
 
         if self.log_orders:
-            self.logEvent("ORDER_ACCEPTED", order.to_dict(), deepcopy_event=False)
+            self.logEvent("ORDER_ACCEPTED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
         # We may later wish to add a status to the open orders so an agent can tell whether
         # a given order has been accepted or not (instead of needing to override this method).
@@ -824,7 +824,9 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"Received notification of cancellation for: {order}")
 
         if self.log_orders:
-            self.logEvent("ORDER_CANCELLED", order.to_dict(), deepcopy_event=False)
+            self.logEvent("ORDER_CANCELLED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
         # Remove the cancelled order from the open orders list.  We may of course wish to have
         # additional logic here later, so agents can easily "look for" cancelled orders.  Of
@@ -849,7 +851,9 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"Received notification of partial cancellation for: {order}")
 
         if self.log_orders:
-            self.logEvent("PARTIAL_CANCELLED", order.to_dict())
+            self.logEvent("PARTIAL_CANCELLED",  
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              deepcopy_event=False)
 
         # if orders still in the list of agent's order update agent's knowledge of
         # current state of the order
@@ -865,7 +869,7 @@ class TradingAgent(FinancialAgent):
             f"After order partial cancellation, agent open orders: {self.orders}"
         )
 
-        self.logEvent("HOLDINGS_UPDATED", self.holdings)
+        self.logEvent("POSITION_UPDATED", str(self.position))
 
     def order_modified(self, order: LimitOrder) -> None:
         """
@@ -880,7 +884,9 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"Received notification of modification for: {order}")
 
         if self.log_orders:
-            self.logEvent("ORDER_MODIFIED", order.to_dict())
+            self.logEvent("ORDER_MODIFIED", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}"
+                              )
 
         # if orders still in the list of agent's order update agent's knowledge of
         # current state of the order
@@ -892,7 +898,7 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order modification, agent open orders: {self.orders}")
 
-        self.logEvent("HOLDINGS_UPDATED", self.holdings)
+        self.logEvent("POSITION_UPDATED", str(self.position))
 
     def order_replaced(self, old_order: LimitOrder, new_order: LimitOrder) -> None:
         """
@@ -907,7 +913,9 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"Received notification of replacement for: {old_order}")
 
         if self.log_orders:
-            self.logEvent("ORDER_REPLACED", old_order.to_dict())
+            self.logEvent("ORDER_REPLACED", 
+                              f"{old_order.side} {old_order.quantity} {old_order.symbol} @ {old_order.limit_price}", 
+                              deepcopy_event=False)
 
         # if orders still in the list of agent's order update agent's knowledge of
         # current state of the order
@@ -922,8 +930,8 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order replacement, agent open orders: {self.orders}")
 
-        # After execution, log holdings.
-        self.logEvent("HOLDINGS_UPDATED", self.holdings)
+        # After execution, log position.
+        self.logEvent("POSITION_UPDATED", str(self.position))
 
     def market_closed(self) -> None:
         """
@@ -967,6 +975,16 @@ class TradingAgent(FinancialAgent):
                 )
             )
 
+    def query_twap(self, twap: float) -> None:
+        """
+        Handles QueryTWAPResponseMsg messages from an exchange agent.
+
+        Arguments:
+            twap: The last twap queried.
+        """
+
+        self.last_twap = twap
+
     def query_spread(
         self,
         symbol: str,
@@ -996,11 +1014,13 @@ class TradingAgent(FinancialAgent):
             best_bid, best_bid_qty = (bids[0][0], bids[0][1])
         else:
             best_bid, best_bid_qty = ("No bids", 0)
+            logger.warning(f"No bid at {fmt_ts(self.current_time)}")
 
         if asks:
             best_ask, best_ask_qty = (asks[0][0], asks[0][1])
         else:
             best_ask, best_ask_qty = ("No asks", 0)
+            logger.warning(f"No ask at {fmt_ts(self.current_time)}")
 
         logger.debug(
             "Received spread of {} @ {} / {} @ {} for {}".format(
@@ -1008,8 +1028,8 @@ class TradingAgent(FinancialAgent):
             )
         )
 
-        self.logEvent("BID_DEPTH", bids)
-        self.logEvent("ASK_DEPTH", asks)
+        # self.logEvent("BID_DEPTH", bids)
+        # self.logEvent("ASK_DEPTH", asks)
         self.logEvent(
             "IMBALANCE", [sum([x[1] for x in bids]), sum([x[1] for x in asks])]
         )
@@ -1136,56 +1156,48 @@ class TradingAgent(FinancialAgent):
 
         return liq
 
+    # PENDLE
     def mark_to_market(
-        self, holdings: Mapping[str, int], use_midpoint: bool = False
+        self, position: Optional[Mapping[str, int]]=None, market_tick: int = None, log: bool = False
     ) -> int:
         """
-        Marks holdings to market (including cash).
+        Marks position to market (including cash) based on the market rate from rate_oracle.
 
         Arguments:
-            holdings:
-            use_midpoint:
+            position:
+            log: log this event or not
         """
+        # If no position is provided, self evaluating the current position
+        if not position:  
+            position = self.position 
+            log = True  # Only log the real mark_to_market
 
-        cash = holdings["CASH"]
+        # If market tick is not provided, find market_tick from orderbook directly
+        if not market_tick:
+            market_tick = self.last_twap  # Should be like this in the future
+            market_tick = self.kernel.book.get_twap()  # Temp for now
 
-        cash += self.basket_size * self.nav_diff
+        cash = position["COLLATERAL"]
 
-        for symbol, shares in holdings.items():
-            if symbol == "CASH":
-                continue
+        n_payment = int((self.mkt_close - self.current_time)/self.kernel.swap_interval)
+            
+        value = (tick_to_rate(market_tick)-position["FIXRATE"])*self.kernel.rate_normalizer*position["SIZE"]*n_payment
 
-            if use_midpoint:
-                bid, ask, midpoint = self.get_known_bid_ask_midpoint(symbol)
-                if bid is None or ask is None or midpoint is None:
-                    value = self.last_trade[symbol] * shares
-                else:
-                    value = midpoint * shares
-            else:
-                value = self.last_trade[symbol] * shares
+        cash += value
 
-            cash += value
-
+        if log:
             self.logEvent(
                 "MARK_TO_MARKET",
-                "{} {} @ {} == {}".format(
-                    shares, symbol, self.last_trade[symbol], value
+                "{} {} @ ({} - {}) * {} * normalizer == {}".format(
+                    position["SIZE"], self.symbol, tick_to_rate(market_tick), position["FIXRATE"], n_payment, value
                 ),
             )
 
-        self.logEvent("MARKED_TO_MARKET", cash)
+            self.logEvent("MARKED_TO_MARKET", cash)
 
         return cash
-
-    def get_holdings(self, symbol: str) -> int:
-        """
-        Gets holdings.  Returns zero for any symbol not held.
-
-        Arguments:
-            symbol: The symbol to query.
-        """
-
-        return self.holdings[symbol] if symbol in self.holdings else 0
+    
+    # end PENDLE
 
     def get_known_bid_ask_midpoint(
         self, symbol: str
@@ -1218,25 +1230,64 @@ class TradingAgent(FinancialAgent):
             2,
         )
 
-    def fmt_holdings(self, holdings: Mapping[str, int]) -> str:
-        """
-        Prints holdings.
+    # PENDLE
+    def maintainance_margin(self, size: Optional[float] = None, size_thresh: List[float] = [20, 100], mm_fac: List[float] = [0.03, 0.06, 0.1]) -> float:
+        if not size:
+            size = self.position["SIZE"]
+        time_to_maturity = (self.mkt_close - self.current_time)/(365*str_to_ns("1d"))
+        mm = 0
 
-        Standard dictionary->string representation is almost fine, but it is less
-        confusing to see the CASH holdings in dollars and cents, instead of just integer
-        cents.  We could change to a Holdings object that knows to print CASH "special".
+        for i in range(len(size_thresh)):
+            if size >= size_thresh[i]:
+                surplus_size = size_thresh[i] if i==0 else size_thresh[i]-size_thresh[i-1]
+                mm += mm_fac[i]*surplus_size*time_to_maturity
+            else:
+                surplus_size = size if i==0 else size-size_thresh[i-1]
+                mm += mm_fac[i]*surplus_size*time_to_maturity
+                return mm
+            
+        surplus_size = size-size_thresh[-1]
+        mm += mm_fac[len(size_thresh)]*surplus_size*time_to_maturity
+        
+        return mm
+        
+    def mRatio(self, position: Optional[Mapping[str, int]]=None):
+        if not position:
+            position = self.position
+
+        return self.maintainance_margin(position["SIZE"])/self.mark_to_market(position, log=False)
+
+    def is_healthy(self):
+        return self.mRatio() < 1
+    
+    def merge_swap(self, size: float, rate: float):
+        """
+        Merge the current position with another position
 
         Arguments:
-            holdings:
+            size: The size of new position
+            rate: The rate of new position
         """
+        self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"],
+                                                                                 size, rate)
+        self.position["COLLATERAL"] += p_merge_pa
+        return p_merge_pa
+    
+    def R2(self, position: Optional[Mapping[str, int]]=None) -> int:
+        """
+        Agent unhealthy
 
-        h = ""
-        for k, v in sorted(holdings.items()):
-            if k == "CASH":
-                continue
-            h += "{}: {}, ".format(k, v)
+        Arguments:
+        """
+        # If no position is provided, self evaluating the current position
+        if not position:  
+            position = self.position 
+        
+        mm = self.maintainance_margin(position["SIZE"])
+        n_payment = int((self.mkt_close - self.current_time)/self.kernel.swap_interval)
 
-        # There must always be a CASH entry.
-        h += "{}: {}".format("CASH", holdings["CASH"])
-        h = "{ " + h + " }"
-        return h
+        sensitive_rate = (mm - position["COLLATERAL"])/(self.kernel.rate_normalizer*position["SIZE"]*n_payment) + position["FIXRATE"]
+
+        sensitive_tick = rate_to_tick(sensitive_rate)
+
+        return sensitive_tick

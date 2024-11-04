@@ -6,6 +6,7 @@ from abides_markets.orders import LimitOrder, Side
 from abides_markets.price_level import PriceLevel
 
 from . import setup_book_with_orders, FakeExchangeAgent, SYMBOL, TIME
+from abides_markets.agents.utils import tick_to_rate
 
 
 def test_handle_limit_orders():
@@ -194,6 +195,7 @@ def test_handle_matching_limit_orders():
     assert agent.messages[1][1].order.quantity == 30
 
 
+
 def test_handle_bad_limit_orders():
     agent = FakeExchangeAgent()
     book = OrderBook(agent, SYMBOL)
@@ -240,22 +242,19 @@ def test_handle_bad_limit_orders():
     with pytest.warns(UserWarning):
         book.handle_limit_order(order)
 
-    with pytest.warns(UserWarning):
-        book.handle_limit_order(order)
+    # # Order limit price is negative
+    # order = LimitOrder(
+    #     agent_id=1,
+    #     time_placed=TIME,
+    #     symbol=SYMBOL,
+    #     quantity=10,
+    #     side=Side.BID,
+    #     is_hidden=True,
+    #     limit_price=-100,
+    # )
 
-    # Order limit price is negative
-    order = LimitOrder(
-        agent_id=1,
-        time_placed=TIME,
-        symbol=SYMBOL,
-        quantity=10,
-        side=Side.BID,
-        is_hidden=True,
-        limit_price=-100,
-    )
-
-    with pytest.warns(UserWarning):
-        book.handle_limit_order(order)
+    # with pytest.warns(UserWarning):
+    #     book.handle_limit_order(order)
 
 
 def test_handle_insert_by_id_limit_order():

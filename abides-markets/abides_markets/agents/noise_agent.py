@@ -25,15 +25,14 @@ class NoiseAgent(TradingAgent):
         name: Optional[str] = None,
         type: Optional[str] = None,
         random_state: Optional[np.random.RandomState] = None,
-        symbol: str = "IBM",
-        starting_cash: int = 100000,
+        symbol: str = "PEN",
         log_orders: bool = False,
+        collateral: int = 100000,
         order_size_model: Optional[OrderSizeGenerator] = None,
         wakeup_time: Optional[NanosecondTime] = None,
     ) -> None:
-
         # Base class init.
-        super().__init__(id, name, type, random_state, starting_cash, log_orders)
+        super().__init__(id, name, type, random_state, symbol, log_orders, collateral)
 
         self.wakeup_time: NanosecondTime = wakeup_time
 
@@ -63,47 +62,11 @@ class NoiseAgent(TradingAgent):
 
         super().kernel_starting(start_time)
 
-        self.oracle = self.kernel.oracle
+        # self.oracle = self.kernel.oracle
 
     def kernel_stopping(self) -> None:
         # Always call parent method to be safe.
         super().kernel_stopping()
-
-        # Fix the problem of logging an agent that has not waken up
-        try:
-            # noise trader surplus is marked to EOD
-            bid, bid_vol, ask, ask_vol = self.get_known_bid_ask(self.symbol)
-        except KeyError:
-            self.logEvent("FINAL_VALUATION", self.starting_cash, True)
-        else:
-            # Print end of day valuation.
-            H = int(round(self.get_holdings(self.symbol), -2) / 100)
-
-            if bid and ask:
-                rT = int(bid + ask) / 2
-            else:
-                rT = self.last_trade[self.symbol]
-
-            # final (real) fundamental value times shares held.
-            surplus = rT * H
-
-            logger.debug("Surplus after holdings: {}", surplus)
-
-            # Add ending cash value and subtract starting cash value.
-            surplus += self.holdings["CASH"] - self.starting_cash
-            surplus = float(surplus) / self.starting_cash
-
-            self.logEvent("FINAL_VALUATION", surplus, True)
-
-            logger.debug(
-                "{} final report.  Holdings: {}, end cash: {}, start cash: {}, final fundamental: {}, surplus: {}",
-                self.name,
-                H,
-                self.holdings["CASH"],
-                self.starting_cash,
-                rT,
-                surplus,
-            )
 
     def wakeup(self, current_time: NanosecondTime) -> None:
         # Parent class handles discovery of exchange times and market_open wakeup call.
@@ -133,7 +96,7 @@ class NoiseAgent(TradingAgent):
             self.set_wakeup(self.wakeup_time)
             return
 
-        if self.mkt_closed and self.symbol not in self.daily_close_price:
+        if self.mkt_closed and (self.symbol not in self.daily_close_price):
             self.get_current_spread(self.symbol)
             self.state = "AWAITING_SPREAD"
             return
@@ -183,6 +146,7 @@ class NoiseAgent(TradingAgent):
 
                 # We now have the information needed to place a limit order with the eta
                 # strategic threshold parameter.
+                # logger.info(f"HEREEEEEE {self.get_known_bid_ask_midpoint(self.symbol)}")
                 self.placeOrder()
                 self.state = "AWAITING_WAKEUP"
 
