@@ -12,18 +12,17 @@ from abides_core.utils import str_to_ns
 from abides_markets.rate_oracle import ConstantOracle
 from abides_markets.agents.utils import tick_to_rate, rate_to_tick
 
-# 设置日志配置
 LOG_DIR = 'logs'
 LOG_FILE = 'test_trading_agent.log'
-os.makedirs(LOG_DIR, exist_ok=True)  # 确保logs文件夹存在
+os.makedirs(LOG_DIR, exist_ok=True)  
 
-# 配置日志记录器
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, LOG_FILE), mode='w'),  # 写入模式，每次运行清空
-        logging.StreamHandler()  # 同时输出到控制台
+        logging.FileHandler(os.path.join(LOG_DIR, LOG_FILE), mode='w'),  
+        logging.StreamHandler()  
     ]
 )
 
