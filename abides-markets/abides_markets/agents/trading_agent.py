@@ -1178,7 +1178,6 @@ class TradingAgent(FinancialAgent):
             market_tick = self.kernel.book.get_twap()  # Temp for now
 
         cash = position["COLLATERAL"]
-
         n_payment = int((self.mkt_close - self.current_time)/self.kernel.swap_interval)
             
         value = (tick_to_rate(market_tick)-position["FIXRATE"])*self.kernel.rate_normalizer*position["SIZE"]*n_payment
