@@ -583,7 +583,7 @@ class TradingAgent(FinancialAgent):
             self.send_message(self.exchange_id, MarketOrderMsg(order))
             if self.log_orders:
                 self.logEvent("ORDER_SUBMITTED", 
-                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              f"{order.side} {order.quantity} {order.symbol} @ MARKET PRICE", 
                               deepcopy_event=False)
 
         else:
@@ -786,7 +786,7 @@ class TradingAgent(FinancialAgent):
 
         self.position["COLLATERAL"] += self.position["SIZE"]*(floating_rate - self.position["FIXRATE"]*self.kernel.rate_normalizer)
         self.logEvent("SWAP", 
-                      f"{self.position['COLLATERAL']} @ ({floating_rate} - {self.position['FIXRATE']} * {self.kernel.rate_normalizer})", 
+                      f"{round(100*floating_rate/self.kernel.rate_normalizer, 4)} %", 
                       deepcopy_event=False)
         return
     # END PENDLE

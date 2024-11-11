@@ -38,7 +38,7 @@ class ConstantOracle(RateOracle):
             current_time: The time that this oracle is queried for the floating rate
 
         Returns:
-            Constant floating rate
+            Constant but random floating rate
         """
         super().get_floating_rate(current_time)
 

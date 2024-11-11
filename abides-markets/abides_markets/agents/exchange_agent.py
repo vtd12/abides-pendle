@@ -146,7 +146,7 @@ class ExchangeAgent(FinancialAgent):
         id: int,
         mkt_open: NanosecondTime,
         mkt_close: NanosecondTime,
-        symbols: List[str],
+        symbols: List[str] = ["PEN"],
         name: Optional[str] = None,
         type: Optional[str] = None,
         random_state: Optional[np.random.RandomState] = None,

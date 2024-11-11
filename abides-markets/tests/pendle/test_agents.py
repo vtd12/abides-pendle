@@ -1,7 +1,7 @@
 import numpy as np
 
 from abides_core.kernel import Kernel
-from abides_markets.agents import TradingAgent
+from abides_markets.agents import TradingAgent, LiquidatorAgent
 from abides_core.utils import str_to_ns
 from abides_markets.agents.utils import tick_to_rate
 
@@ -10,7 +10,7 @@ from abides_markets.rate_oracle import ConstantOracle
 
 def test_maintainance_margin():
     agent = TradingAgent(id=0)
-    agent.pen_oracle = ConstantOracle()
+    agent.rate_oracle = ConstantOracle()
 
     agent.position = {"COLLATERAL": 100,
                       "SIZE": 0,
@@ -32,6 +32,10 @@ class FakeOrderBook:
 
     def get_twap(self):
         return 1000
+    
+class FakeOracle:
+    def __init__(self):
+        pass
 
 def test_mark_to_market():
     agent = TradingAgent(id=0)
@@ -85,7 +89,37 @@ def test_liquidation_status():
     assert not agent.is_healthy()
 
 def test_liquidator():
-    pass
+    liquidator = LiquidatorAgent(id=0)
+    dummy_agent = TradingAgent(id=1)
+
+    kernel = Kernel([liquidator, dummy_agent], 
+                    swap_interval = str_to_ns("8h"),
+                    )
+    kernel.book = FakeOrderBook()
+
+    dummy_agent.kernel = kernel
+    liquidator.kernel = kernel
+
+    dummy_agent.position = {"COLLATERAL": 14,
+                            "SIZE": 100,
+                            "FIXRATE": 0.20}
+    dummy_agent.mkt_open = 0
+    dummy_agent.mkt_close = 365*str_to_ns("1d")
+    dummy_agent.current_time = 0
+    
+    liquidator.known_bids[liquidator.symbol] = [
+        [1000, 10],
+        [950, 10]
+    ]
+
+    liquidator.check_liquidate(dummy_agent, sell=False)
+    assert dummy_agent.position["SIZE"] == 90
+    assert dummy_agent.position["COLLATERAL"] > 0
+    assert dummy_agent.position["COLLATERAL"] < 14
+
+
+
+    
 
 
 

@@ -133,9 +133,8 @@ class PendleMarketMakerAgent(TradingAgent):
         self, current_time: NanosecondTime, sender_id: int, message: Message
     ) -> None:
         """Processes message from exchange.
+        Main function is to update orders in orderbook relative to mid-price.
 
-        
-Main function is to update orders in orderbook relative to mid-price.
         Arguments:
             current_time: Simulation current time.
             message: Message received by self from ExchangeAgent.
@@ -157,6 +156,7 @@ Main function is to update orders in orderbook relative to mid-price.
         if isinstance(message, BookImbalanceDataMsg):
             if message.stage == MarketDataEventMsg.Stage.START:
                 try:
+                    self.logEvent("UNBALANCED_MARKET", f"{round(100*message.imbalance, 2)}% {message.side}")
                     self.place_orders(mid)
                     self.last_time_book_order = current_time
                 except:

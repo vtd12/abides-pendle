@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from abides_markets.oracles import SparseMeanRevertingOracle
+from abides_markets.driving_oracle import SparseMeanRevertingOracle
 from abides_core.utils import get_wake_time, str_to_ns
 
 

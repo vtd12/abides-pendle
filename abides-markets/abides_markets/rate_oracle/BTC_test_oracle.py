@@ -40,9 +40,9 @@ class BTCOracle(RateOracle):
                 self.funding_rate_table = pickle.load(f)
         
         for i in range(len(self.funding_rate_table)):
-            self.funding_rate_table.iloc[i, 1] = int(self.funding_rate_table.iloc[i, 1].timestamp()*1000)
+            self.funding_rate_table.iloc[i, 1] = int(pd.to_datetime(self.funding_rate_table.iloc[i, 1]).to_datetime64())
 
-        self.last_rate: float = 0
+        self.last_rate: float = 0.0001  # Default funding rate
 
     def get_floating_rate(self, current_time: NanosecondTime) -> float:
         """
@@ -60,6 +60,8 @@ class BTCOracle(RateOracle):
         while  self.funding_rate_table.iloc[query_index, 1] < self.current_time:
             self.last_rate = self.funding_rate_table.iloc[query_index, 0]
             query_index += 1
+            if query_index == len(self.funding_rate_table):  # No more index to look at
+                break
             
         self.funding_rate_table.drop(self.funding_rate_table.index[:query_index], inplace=True)
 

@@ -8,7 +8,7 @@ from abides_core.utils import str_to_ns, merge_swap
 from ..messages.marketdata import MarketDataMsg, L2SubReqMsg
 from ..messages.query import QuerySpreadResponseMsg
 from ..orders import Side
-from .trading_agent import TradingAgent
+from .trading_agent import TradingAgent, ExchangeAgent
 
 
 class LiquidatorAgent(TradingAgent):
@@ -27,8 +27,8 @@ class LiquidatorAgent(TradingAgent):
         wake_up_freq: NanosecondTime = str_to_ns("1h"),
         subscribe=False,
         log_orders=False,
-        collateral: float = 100000,
-        watch_list: List[TradingAgent] = []
+        collateral: float = 100_000,
+        watch_list: List[int] = []
     ) -> None:
 
         super().__init__(id, name, type, random_state, symbol, log_orders, collateral)
@@ -43,6 +43,8 @@ class LiquidatorAgent(TradingAgent):
 
     def kernel_starting(self, start_time: NanosecondTime) -> None:
         super().kernel_starting(start_time)
+
+        self.watch_list: List[int] = self.kernel.find_agents_by_type(TradingAgent)
 
     def wakeup(self, current_time: NanosecondTime) -> None:
         """Agent wakeup is determined by self.wake_up_freq"""
@@ -72,8 +74,8 @@ class LiquidatorAgent(TradingAgent):
         ):
             sum_before = self.failed_liquidation
 
-            for agent in self.watch_list:
-                self.check_liquidate(agent)
+            for agent_id in self.watch_list:
+                self.check_liquidate(self.kernel.agents[agent_id])  # It should be in term of msg rather than directly like this
 
             new_failed_liquidation = self.failed_liquidation - sum_before
             self.logEvent("R1 METRIC", new_failed_liquidation)
@@ -86,11 +88,11 @@ class LiquidatorAgent(TradingAgent):
             and isinstance(message, MarketDataMsg)
         ):
             for agent in self.watch_list:
-                self.check_liquidate(agent)
+                self.check_liquidate(self.kernel.agents[agent_id])
 
             self.state = "AWAITING_MARKET_DATA"
 
-    def check_liquidate(self, agent: TradingAgent, sell:bool = True) -> bool:
+    def check_liquidate(self, agent: TradingAgent, sell: bool = True) -> bool:
         """
         Check if an agent is liquidatable. Liquidate him if profitable.
         
@@ -100,7 +102,8 @@ class LiquidatorAgent(TradingAgent):
         """
         if agent.is_healthy():
             return False
-        
+        self.logEvent("LIQUIDATE", f"AGENT ID: {agent.id}")
+
         mRatio = agent.mRatio()
         liq_ict_fact = 1 - 1/mRatio
 

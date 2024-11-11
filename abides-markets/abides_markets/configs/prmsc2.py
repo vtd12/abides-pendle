@@ -3,6 +3,7 @@
 # - 1000      Noise Agents
 # - 100       Value Agents
 # - 2       Market Maker Agents
+# - 1       Liquidator Agents
 
 import os
 from datetime import datetime
@@ -21,7 +22,8 @@ from abides_markets.agents import (
 from abides_markets.models import OrderSizeModel
 from abides_markets.utils import generate_latency_model
 
-from abides_markets.rate_oracle import BTCOracle
+from abides_markets.rate_oracle import BTCOracle, ConstantOracle
+from abides_markets.driving_oracle import ManualOracle
 
 ########################################################################################################################
 ############################################### GENERAL CONFIG #########################################################
@@ -30,7 +32,7 @@ from abides_markets.rate_oracle import BTCOracle
 def build_config(
     seed=int(datetime.now().timestamp() * 1_000_000) % (2**32 - 1),
     start_date="20230101",
-    end_date="20240101",
+    end_date="20230201",
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
@@ -43,16 +45,22 @@ def build_config(
     exchange_log_orders=None,
     # 2) Noise Agent
     num_noise_agents=1000,
+    # 3) Oracle
+    kappa = 0.001,  # 0.1% mean reversion
+    sigma_s = 100,
     # 4) Value Agents
     num_value_agents=100,
-    value_agents_wake_up_freq="200min",
+    value_agents_wake_up_freq="300min",
     r_bar=0.10,
     # 5) Market Maker Agents
     num_mm=2,
-    mm_agents_wake_up_freq="1h"
+    mm_agents_wake_up_freq="60min",
+    # 6) Liquidator Agents
+    num_liq_agents = 1,
+    liq_agents_wake_up_freq="60min",
 ):
     """
-    create the background configuration for rmsc04
+    create the background configuration for prmsc02
     These are all the non-learning agent that will run in the simulation
     :param seed: seed of the experiment
     :type seed: int
@@ -71,6 +79,17 @@ def build_config(
     MKT_OPEN = int(pd.to_datetime(start_date).to_datetime64())
     MKT_CLOSE = int(pd.to_datetime(end_date).to_datetime64())
     SWAP_INT = str_to_ns(swap_interval)
+
+    # driving oracle
+    symbols = {
+        ticker: {
+            "r_bar": r_bar,
+            "kappa": kappa,
+            "sigma_s": sigma_s
+        }
+    }
+
+    driving_oracle = ManualOracle(MKT_OPEN, MKT_CLOSE, symbols)
 
     # Agent configuration
     agent_count, agents, agent_types = 0, [], []
@@ -188,6 +207,27 @@ def build_config(
     agent_count += num_mm
     agent_types.extend(["PendleMarketMakerAgent"])
 
+    # LIQUIDATOR
+    agents.extend(
+        [
+            LiquidatorAgent(
+                id=j,
+                name="Liquidator Agent {}".format(j),
+                type="LiquidatorAgent",
+                symbol=ticker,
+                collateral=1000*starting_collateral,
+                log_orders=log_orders,
+                random_state=np.random.RandomState(
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
+                wake_up_freq=str_to_ns(liq_agents_wake_up_freq)
+            )
+            for j in range(agent_count, agent_count + num_liq_agents)
+        ]
+    )
+    agent_count += num_liq_agents
+    agent_types.extend(["LiquidatorAgent"])
+
 
     # extract kernel seed here to reproduce the state of random generator in old version
     random_state_kernel = np.random.RandomState(
@@ -203,11 +243,14 @@ def build_config(
     kernelStopTime = MKT_CLOSE + str_to_ns("1h")
     kernelSwapInt = SWAP_INT
 
-    # PENDLE
     rate_oracle = BTCOracle(kernelStartTime,
                             kernelStopTime
                             )
-    # END PENDLE
+    # rate_oracle = ConstantOracle(kernelStartTime,
+    #                           kernelStopTime,
+    #                           const_rate = r_bar,
+    #                           starting_market_rate = r_bar
+    #                           )
 
     return {
         "seed": seed,
@@ -217,7 +260,8 @@ def build_config(
         "agents": agents,
         "agent_latency_model": latency_model,
         "default_computation_delay": default_computation_delay,
-        "custom_properties": {"rate_oracle": rate_oracle},
+        "custom_properties": {"rate_oracle": rate_oracle,
+                              "driving_oracle": driving_oracle},
         "random_state_kernel": random_state_kernel,
         "stdout_log_level": stdout_log_level,
     }
