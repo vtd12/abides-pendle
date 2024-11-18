@@ -1,13 +1,14 @@
 import datetime as dt
 import logging
 from math import sqrt
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import numpy as np
 import pandas as pd
 
 from abides_core import NanosecondTime
 from abides_core.utils import str_to_ns
+from ..agents.utils import tick_to_rate, rate_to_tick
 
 from .oracle import Oracle
 
@@ -21,10 +22,12 @@ class ManualOracle(Oracle):
         mkt_open: NanosecondTime,
         mkt_close: NanosecondTime,
         symbols: Dict[str, Dict[str, Any]],
+        megashock: List[Dict[str, float]] = []
     ) -> None:
         self.mkt_open: NanosecondTime = mkt_open
         self.mkt_close: NanosecondTime = mkt_close
         self.symbols: Dict[str, Dict[str, Any]] = symbols
+        self.megashock: List[Dict[str, float]] = megashock
 
         self.freq: str = "1min"
 
@@ -36,7 +39,7 @@ class ManualOracle(Oracle):
             self.r[symbol] = self.generate_fundamental_value_series(symbol=symbol, **s)
 
     def generate_fundamental_value_series(
-        self, symbol: str, r_bar: int, kappa: float, sigma_s: float
+        self, symbol: str, r_bar: float, kappa: float, sigma_s: float
     ) -> np.array:
         """Generates the fundamental value series for a single stock symbol.
 
@@ -63,14 +66,19 @@ class ManualOracle(Oracle):
 
         s = pd.Series(index=date_range)
         r = np.zeros(len(s.index))
-        r[0] = r_bar
+        r_bar_tick = rate_to_tick(r_bar)
+        r[0] = r_bar_tick
 
         # Predetermine the random shocks for all time steps (at once, for computation speed).
         shock = np.random.normal(scale=sigma_s, size=(r.shape[0]))
+    
+        for megashock in self.megashock:
+            index = int(megashock["time"]*r.shape[0])
+            shock[index] = megashock["mag"]
 
         # Compute the value series.
         for t in range(1, r.shape[0]):
-            r[t] = max(0, (kappa * r_bar) + ((1 - kappa) * r[t - 1]) + shock[t])
+            r[t] = max(0, (kappa * r_bar_tick) + ((1 - kappa) * r[t - 1]) + shock[t])
 
         # Replace the series values with the fundamental value series.  Round and convert to
         # integer cents.
@@ -108,7 +116,7 @@ class ManualOracle(Oracle):
         random_state: np.random.RandomState,
         sigma_n: int = 50**2  # sd of 50 ticks
     ) -> int:
-        """Return a noisy observation of the current fundamental value.
+        """Return a noisy observation of the current fundamental value (NOTE: in term of tick).
 
         While the fundamental value for a given equity at a given time step does
         not change, multiple agents observing that value will receive different

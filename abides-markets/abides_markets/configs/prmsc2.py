@@ -23,7 +23,7 @@ from abides_markets.models import OrderSizeModel
 from abides_markets.utils import generate_latency_model
 
 from abides_markets.rate_oracle import BTCOracle, ConstantOracle
-from abides_markets.driving_oracle import ManualOracle
+from abides_markets.driving_oracle import ManualOracle, LinearOracle
 
 ########################################################################################################################
 ############################################### GENERAL CONFIG #########################################################
@@ -36,7 +36,7 @@ def build_config(
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
-    starting_collateral=100,  
+    starting_collateral=100_000,  
     log_orders=True,  # if True log everything
     # 1) Exchange Agent
     book_logging=True,
@@ -47,7 +47,7 @@ def build_config(
     num_noise_agents=1000,
     # 3) Oracle
     kappa = 0.001,  # 0.1% mean reversion
-    sigma_s = 100,
+    sigma_s = 100,  # The sd of the noise shock
     # 4) Value Agents
     num_value_agents=100,
     value_agents_wake_up_freq="300min",
@@ -57,7 +57,7 @@ def build_config(
     mm_agents_wake_up_freq="60min",
     # 6) Liquidator Agents
     num_liq_agents = 1,
-    liq_agents_wake_up_freq="60min",
+    liq_agents_wake_up_freq="60min", # avg. 10 min check regularly, each recheck every 1 min after successfully liquidate
 ):
     """
     create the background configuration for prmsc02
@@ -73,7 +73,7 @@ def build_config(
     np.random.seed(seed)
 
     # order size model
-    ORDER_SIZE_MODEL = OrderSizeModel()  # Order size model
+    ORDER_SIZE_MODEL = OrderSizeModel()  # NOTE: 90% of order would be $1M notional
 
     # date&time
     MKT_OPEN = int(pd.to_datetime(start_date).to_datetime64())
@@ -81,15 +81,33 @@ def build_config(
     SWAP_INT = str_to_ns(swap_interval)
 
     # driving oracle
+    # symbols = {
+    #     ticker: {
+    #         "r_bar": r_bar,
+    #         "kappa": kappa,
+    #         "sigma_s": sigma_s
+    #     }
+    # }
+
+    # driving_oracle = ManualOracle(MKT_OPEN, MKT_CLOSE, symbols,
+    #                             #   [
+    #                             #       {"time": 1/3, "mag": 500}, 
+    #                             #       {"time": 2/3, "mag": -500}
+    #                             #   ]
+    #                                )
+    # Example for linear oracle
     symbols = {
         ticker: {
-            "r_bar": r_bar,
-            "kappa": kappa,
-            "sigma_s": sigma_s
+            "kappa": 0.01,
+            "sigma_s": 10**2
         }
     }
 
-    driving_oracle = ManualOracle(MKT_OPEN, MKT_CLOSE, symbols)
+    driving_oracle = LinearOracle(MKT_OPEN, MKT_CLOSE, symbols, [{"time": 0, "mag": 1000},
+                                                                # {"time": 1/3, "mag": 1500},
+                                                                # {"time": 2/3, "mag": 500},
+                                                                {"time": 1, "mag": 2000}
+                                                                ])
 
     # Agent configuration
     agent_count, agents, agent_types = 0, [], []
@@ -140,27 +158,6 @@ def build_config(
     )
     agent_count += num_noise_agents
     agent_types.extend(["NoiseAgent"])
-
-    # # FIRST SEEDING AGENT
-    # agents.extend(
-    #     [
-    #         PendleSeedingAgent(
-    #             id=j,
-    #             name="Seeding Agent {}".format(j),
-    #             type="PendleSeedingAgent",
-    #             symbol=ticker,
-    #             collateral=1000*starting_collateral,
-    #             size=seeding_size,
-    #             log_orders=log_orders,
-    #             random_state=np.random.RandomState(
-    #                 seed=np.random.randint(low=0, high=2**32, dtype="uint64")
-    #             ),
-    #         )
-    #         for j in range(agent_count, agent_count + num_seeding_agents)
-    #     ]
-    # )
-    # agent_count += num_seeding_agents
-    # agent_types.extend(["PendleSeedingAgent"])
 
     # VALUE AGENT
     agents.extend(

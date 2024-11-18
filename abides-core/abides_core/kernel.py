@@ -278,6 +278,8 @@ class Kernel:
         swap_time = mkt_open + self.swap_interval
 
         while swap_time <= mkt_close:
+            # In the future do this instead 
+            # self.messages.put((swap_time, (None, None, SwapMsg())))
             for agent in self.agents[1:]:  # Only swap with trading agents
                 self.messages.put((swap_time, (-1, agent.id, SwapMsg())))
             swap_time += self.swap_interval
@@ -321,7 +323,7 @@ class Kernel:
             sender_id, recipient_id, message = event
 
             # Periodically print the simulation time and total messages, even if muted.
-            if self.ttl_messages % 1_000_000 == 0:
+            if self.ttl_messages % 100_000 == 0:
                 logger.info(
                     "--- Simulation time: {}, messages processed: {:,}, wallclock elapsed: {:.2f}s ---".format(
                         fmt_ts(self.current_time),
@@ -419,7 +421,8 @@ class Kernel:
                 self.agent_current_times[recipient_id] = self.current_time
 
                 # Swap the agent and get value passed to kernel to listen for kernel interruption signal
-                swap_result = self.agents[recipient_id].swap(self.current_time, self.rate_oracle.get_floating_rate(self.current_time))
+                swap_floating_rate = self.rate_oracle.get_floating_rate(self.current_time)
+                swap_result = self.agents[recipient_id].swap(self.current_time, swap_floating_rate)
 
                 # Delay the agent by its computation delay plus any transient additional delay requested.
                 self.agent_current_times[recipient_id] += (
@@ -556,7 +559,7 @@ class Kernel:
 
         # This should perhaps be elsewhere, as it is explicitly financial, but it
         # is convenient to have a quick summary of the results for now.
-        logger.info("Mean ending value by agent type:")
+        logger.info("Mean ending valuation (PnL) by agent type:")
 
         for a in self.mean_result_by_agent_type:
             value = self.mean_result_by_agent_type[a]

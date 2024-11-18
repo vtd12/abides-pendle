@@ -53,6 +53,9 @@ class ValueAgent(TradingAgent):
 
         self.funding_rate_coef: float = coef[0]
         self.oracle_coef: float = coef[1]
+        assert coef[0] >= 0 and coef[0] < 1
+        assert coef[1] >= 0 and coef[1] < 1
+        assert sum(coef) < 1
 
     def kernel_starting(self, start_time: NanosecondTime) -> None:
         # self.kernel is set in Agent.kernel_initializing()
@@ -113,11 +116,11 @@ class ValueAgent(TradingAgent):
             self.current_time,
             random_state=self.random_state,
         )
-
         last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
 
         self.r_t = (1 - self.oracle_coef - self.funding_rate_coef)*self.r_t + self.funding_rate_coef*last_funding_rate + self.oracle_coef*tick_to_rate(obs_t)
-        
+        # self.logEvent("NEW ESTIMATE", self.r_t)
+
         return self.r_t
 
     def placeOrder(self) -> None:

@@ -211,12 +211,6 @@ class ExchangeAgent(FinancialAgent):
         # (this is most likely all agents)
         self.market_close_price_subscriptions: List[int] = []
 
-        # A single mid price queue to keep track of the nearest mid prices to calculate the TWAP
-        self.mid_prices: queue.PriorityQueue[float] = queue.PriorityQueue()
-
-        # The exchange keeps track of the last twap calculated, this value is updated everytime the twap is updated
-        self.last_twap = None
-
     def kernel_initializing(self, kernel: "Kernel") -> None:
         """
         The exchange agent overrides this to obtain a reference to an oracle.
@@ -372,7 +366,7 @@ class ExchangeAgent(FinancialAgent):
                     )
         else:
             self.logEvent(message.type(), message)
-
+ 
         if isinstance(message, MarketDataSubReqMsg):
             # Handle the DATA SUBSCRIPTION request and cancellation messages from the agents.
             if message.symbol not in self.order_books:

@@ -28,10 +28,7 @@ def test_maintainance_margin():
 
 class FakeOrderBook:
     def __init__(self):
-        pass
-
-    def get_twap(self):
-        return 1000
+        self.last_twap = 1000
     
 class FakeOracle:
     def __init__(self):

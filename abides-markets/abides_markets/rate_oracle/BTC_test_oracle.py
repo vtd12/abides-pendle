@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class BTCOracle(RateOracle):
     """
-    This oracle return a constant floating rate overtime.
+    This oracle return the real funding rate of BTC on Binance in 2023.
     """
 
     def __init__(

@@ -156,6 +156,9 @@ class TradingAgent(FinancialAgent):
         # as we know.
         self.mkt_closed: bool = False
 
+        # Keep track of the R2 for the plot
+        # self.R2: List[Tuple[NanosecondTime, int]]
+
     # Simulation lifecycle messages.
 
     def kernel_starting(self, start_time: NanosecondTime) -> None:
@@ -186,14 +189,12 @@ class TradingAgent(FinancialAgent):
 
         assert self.kernel is not None
 
-        # Print end of day position.
-        self.logEvent("FINAL_COLLATERAL", self.position["COLLATERAL"], True)
 
         # Record final results for presentation/debugging.  This is an ugly way
         # to do this, but it is useful for now.
         mytype = self.type
         gain = self.position["COLLATERAL"] - self.starting_collateral
-        self.logEvent("FINAL_VALUATION", gain/self.starting_collateral, True)
+        self.logEvent("FINAL_PNL", f"{100*gain/self.starting_collateral}%", True)
 
         if mytype in self.kernel.mean_result_by_agent_type:
             self.kernel.mean_result_by_agent_type[mytype] += gain
@@ -218,8 +219,6 @@ class TradingAgent(FinancialAgent):
         super().wakeup(current_time)
 
         if self.first_wake:
-            # Log initial POSITION.
-            self.logEvent("POSITION_UPDATED", str(self.position))
             self.first_wake = False
 
             # Tell the exchange we want to be sent the final prices when the market closes.
@@ -741,7 +740,7 @@ class TradingAgent(FinancialAgent):
 
         if self.log_orders:
             self.logEvent("ORDER_EXECUTED", 
-                              f"{order.side} {order.quantity} {order.symbol} @ {order.limit_price}", 
+                              f"{order.side} {order.quantity} {order.symbol} @ {order.fill_price}", 
                               deepcopy_event=False)
 
         # At the very least, we must update position at execution time.
@@ -769,15 +768,18 @@ class TradingAgent(FinancialAgent):
         logger.debug(f"After order execution, agent open orders: {self.orders}")
 
         self.logEvent("POSITION_UPDATED", str(self.position))
+        
+        if self.R2():
+            self.logEvent("R2", self.R2())
 
     # PENDLE
     def swap(self, current_time: NanosecondTime, floating_rate: float):
         """
-        PENDLE: Used periodically swap with the exchange based on pos_size and pos_fixrate 
+        PENDLE: Used periodically swap with the exchange based on pos_size and pos_fixrate. Only called by the kernel.
 
         Arguments:
             current_time: The time that this agent was notified to do the swap
-            floating_rate: The rate (typically from Pendle Oracle) user need to pay in exchange for the pos_fixrate
+            floating_rate: The rate (typically from Rate Oracle) user need to pay in exchange for the pos_fixrate
 
         Returns:
             
@@ -788,6 +790,12 @@ class TradingAgent(FinancialAgent):
         self.logEvent("SWAP", 
                       f"{round(100*floating_rate/self.kernel.rate_normalizer, 4)} %", 
                       deepcopy_event=False)
+        
+        self.logEvent("POSITION_UPDATED", str(self.position))
+        
+        if self.R2():
+            self.logEvent("R2", self.R2())
+        
         return
     # END PENDLE
 
@@ -1175,7 +1183,7 @@ class TradingAgent(FinancialAgent):
         # If market tick is not provided, find market_tick from orderbook directly
         if not market_tick:
             market_tick = self.last_twap  # Should be like this in the future
-            market_tick = self.kernel.book.get_twap()  # Temp for now
+            market_tick = self.kernel.book.last_twap  # Temp for now
 
         cash = position["COLLATERAL"]
 
@@ -1188,8 +1196,8 @@ class TradingAgent(FinancialAgent):
         if log:
             self.logEvent(
                 "MARK_TO_MARKET",
-                "{} {} @ ({} - {}) * {} * normalizer == {}".format(
-                    position["SIZE"], self.symbol, tick_to_rate(market_tick), position["FIXRATE"], n_payment, value
+                "{} + {} {} @ ({} - {}) * {} * normalizer = {}".format(
+                    position["COLLATERAL"], position["SIZE"], self.symbol, tick_to_rate(market_tick), position["FIXRATE"], n_payment, cash
                 ),
             )
 
@@ -1234,6 +1242,8 @@ class TradingAgent(FinancialAgent):
     def maintainance_margin(self, size: Optional[float] = None, size_thresh: List[float] = [20, 100], mm_fac: List[float] = [0.03, 0.06, 0.1]) -> float:
         if not size:
             size = self.position["SIZE"]
+
+        size = abs(size)  # Convert to positive
         time_to_maturity = (self.mkt_close - self.current_time)/(365*str_to_ns("1d"))
         mm = 0
 
@@ -1255,6 +1265,9 @@ class TradingAgent(FinancialAgent):
         if not position:
             position = self.position
 
+        MtM = self.mark_to_market(position, log=False) 
+        if MtM < 0:
+            return np.inf
         return self.maintainance_margin(position["SIZE"])/self.mark_to_market(position, log=False)
 
     def is_healthy(self):
@@ -1273,6 +1286,27 @@ class TradingAgent(FinancialAgent):
         self.position["COLLATERAL"] += p_merge_pa
         return p_merge_pa
     
+    def liquidated(self, d_col, d_size):
+        """
+        Called after each successful liquidation. Might not be fully liquidated.
+
+        Arguments:
+        d_col: Loss in Collateral
+        d_size: Decrease in position size
+        """
+        # After liquidated, log position.
+        self.logEvent("LIQUIDATED", f"Col -{d_col}")
+        self.logEvent("POSITION_UPDATED", str(self.position))
+
+        if self.R2():
+            self.logEvent("R2", self.R2())
+
+    def logR1(self, notional):
+        self.logEvent("R1", notional)
+
+    def logR2(self):
+        self.logEvent("R2", self.R2())
+
     def R2(self, position: Optional[Mapping[str, int]]=None) -> int:
         """
         Agent unhealthy
@@ -1285,6 +1319,9 @@ class TradingAgent(FinancialAgent):
         
         mm = self.maintainance_margin(position["SIZE"])
         n_payment = int((self.mkt_close - self.current_time)/self.kernel.swap_interval)
+
+        if position["SIZE"]*n_payment == 0:
+            return None
 
         sensitive_rate = (mm - position["COLLATERAL"])/(self.kernel.rate_normalizer*position["SIZE"]*n_payment) + position["FIXRATE"]
 
