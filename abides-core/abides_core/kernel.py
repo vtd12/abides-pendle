@@ -561,10 +561,16 @@ class Kernel:
         # is convenient to have a quick summary of the results for now.
         logger.info("Mean ending valuation (PnL) by agent type:")
 
+        total_val = 0
+
         for a in self.mean_result_by_agent_type:
             value = self.mean_result_by_agent_type[a]
             count = self.agent_count_by_type[a]
             logger.info(f"{a}: {value / count}")
+
+            total_val += value
+
+        logger.info(f"End total value {round(total_val, 2)}")
 
         logger.info(f"Simulation ended at {fmt_ts(self.current_time)}!")
 

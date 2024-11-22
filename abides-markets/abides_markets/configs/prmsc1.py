@@ -37,7 +37,7 @@ def build_config(
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
-    starting_collateral=100,  
+    starting_collateral=1_000,  
     log_orders=True,  # if True log everything
     # 1) Exchange Agent
     book_logging=True,

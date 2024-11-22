@@ -114,17 +114,25 @@ class LiquidatorAgent(TradingAgent):
         if agent.is_healthy():
             agent.logR1(0)
             return False
+        
+        if agent.position["COLLATERAL"] <= 0:
+            self.logEvent("FAILED_LIQUIDATION_NO_COL", f"AGENT ID: {agent.id}")
+            return False
+        
+        # print(agent.position)
+
         self.logEvent("LIQUIDATE", f"AGENT ID: {agent.id}")
 
         mRatio = agent.mRatio()
-        liq_ict_fact = 1 - 1/mRatio
 
-        assert 0 < liq_ict_fact and liq_ict_fact < 1
+        liq_fac_base = 0
+        liq_fac_slope = 1
+        liq_ict_fact = liq_fac_base + liq_fac_slope * (1 - 1/mRatio)
 
         agent.cancel_all_orders()
 
         market_tick = self.kernel.book.last_twap
-        longing = True if agent.position["SIZE"] >=0 else False  # indicate agent is longing yield
+        longing = True if agent.position["SIZE"] > 0 else False  # indicate agent is longing yield
         d_size = 0
 
         if longing:  # We need to liquidate by market ask order (selling) (i.e. look at BID wall)
@@ -134,7 +142,7 @@ class LiquidatorAgent(TradingAgent):
 
                 d_size += bid[1]
 
-                if d_size > agent.position["SIZE"]:
+                if d_size >= agent.position["SIZE"]:
                     d_size = agent.position["SIZE"]
                     break
             
@@ -164,6 +172,8 @@ class LiquidatorAgent(TradingAgent):
         liq_val = l*p_unrealized
 
         d_col = -liq_val*(1+(liq_ict_fact if liq_val<0 else -liq_ict_fact))
+
+        # d_col = min(agent.position["COLLATERAL"], 0)
         
         agent.position["COLLATERAL"] -= d_col
         self.position["COLLATERAL"] += d_col
@@ -172,14 +182,17 @@ class LiquidatorAgent(TradingAgent):
         assert self.position["SIZE"] == 0
         self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"], 
                                                                         d_size, agent.position["FIXRATE"])
-        self.position["COLLATERAL"] += p_merge_pa
-
+        
         assert p_merge_pa == 0
 
         agent.position["SIZE"] -= d_size
+        if agent.position["SIZE"] == 0:
+            agent.position["FIXRATE"] == 0
 
         self.logEvent("SUCCESSFUL_LIQUIDATION", 
                       f"AGENT ID: {agent.id}, SIZE {d_size}")
+        
+        self.logEvent("POSITION_UPDATED", str(self.position))
         
         agent.liquidated(d_col, d_size)
 
