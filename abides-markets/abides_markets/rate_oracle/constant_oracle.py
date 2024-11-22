@@ -38,13 +38,11 @@ class ConstantOracle(RateOracle):
             current_time: The time that this oracle is queried for the floating rate
 
         Returns:
-            Constant floating rate
+            Constant but random floating rate
         """
         super().get_floating_rate(current_time)
 
-        np.random.seed(current_time%2**32)
-
-        return np.random.uniform(0, 0.0002)
+        return 0.0001
     
     def get_daily_open_price(
         self, symbol: str, mkt_open: NanosecondTime

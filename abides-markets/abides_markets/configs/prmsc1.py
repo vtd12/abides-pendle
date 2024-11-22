@@ -3,6 +3,7 @@
 # - 10      Noise Agents
 # - 5       Value Agents
 # - 2       Market Maker Agents
+# - 1       Liquidator Agents
 
 import os
 from datetime import datetime
@@ -23,6 +24,7 @@ from abides_markets.models import OrderSizeModel
 from abides_markets.utils import generate_latency_model
 
 from abides_markets.rate_oracle import ConstantOracle
+from abides_markets.driving_oracle import ManualOracle
 
 ########################################################################################################################
 ############################################### GENERAL CONFIG #########################################################
@@ -44,13 +46,19 @@ def build_config(
     exchange_log_orders=None,
     # 2) Noise Agent
     num_noise_agents=10,
+    # 3) Oracle
+    kappa = 0.001,  # 0.1% mean reversion
+    sigma_s = 100,
     # 4) Value Agents
     num_value_agents=5,
     value_agents_wake_up_freq="10min",
     r_bar=0.10,
     # 5) Market Maker Agents
     num_mm=2,
-    mm_agents_wake_up_freq="1h"
+    mm_agents_wake_up_freq="1h",
+    # 6) Liquidator Agents
+    num_liq_agents = 1,
+    liq_agents_wake_up_freq="1h",
 ):
     """
     create the background configuration for rmsc04
@@ -72,6 +80,17 @@ def build_config(
     MKT_OPEN = int(pd.to_datetime(start_date).to_datetime64())
     MKT_CLOSE = int(pd.to_datetime(end_date).to_datetime64())
     SWAP_INT = str_to_ns(swap_interval)
+
+    # driving oracle
+    symbols = {
+        ticker: {
+            "r_bar": r_bar,
+            "kappa": kappa,
+            "sigma_s": sigma_s
+        }
+    }
+
+    driving_oracle = ManualOracle(MKT_OPEN, MKT_CLOSE, symbols)
 
     # Agent configuration
     agent_count, agents, agent_types = 0, [], []
@@ -189,6 +208,27 @@ def build_config(
     agent_count += num_mm
     agent_types.extend(["PendleMarketMakerAgent"])
 
+    # LIQUIDATOR
+    agents.extend(
+        [
+            LiquidatorAgent(
+                id=j,
+                name="Liquidator Agent {}".format(j),
+                type="LiquidatorAgent",
+                symbol=ticker,
+                collateral=1000*starting_collateral,
+                log_orders=log_orders,
+                random_state=np.random.RandomState(
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
+                wake_up_freq=str_to_ns(liq_agents_wake_up_freq)
+            )
+            for j in range(agent_count, agent_count + num_liq_agents)
+        ]
+    )
+    agent_count += num_liq_agents
+    agent_types.extend(["LiquidatorAgent"])
+
 
     # extract kernel seed here to reproduce the state of random generator in old version
     random_state_kernel = np.random.RandomState(
@@ -220,7 +260,8 @@ def build_config(
         "agents": agents,
         "agent_latency_model": latency_model,
         "default_computation_delay": default_computation_delay,
-        "custom_properties": {"rate_oracle": rate_oracle},
+        "custom_properties": {"rate_oracle": rate_oracle, 
+                              "driving_oracle": driving_oracle},
         "random_state_kernel": random_state_kernel,
         "stdout_log_level": stdout_log_level,
     }

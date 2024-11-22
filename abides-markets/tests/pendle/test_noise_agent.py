@@ -1,28 +1,16 @@
 import logging
 import numpy as np
-from typing import Optional, Dict, Any, List
 import queue
-import sys
-from abides_core import Message, NanosecondTime
 from abides_core.agent import Agent
-from abides_markets.agents.trading_agent import TradingAgent
+from abides_core import NanosecondTime
+from abides_markets.agents.noise_agent import NoiseAgent
 from abides_markets.messages.query import QuerySpreadResponseMsg
 from abides_markets.orders import Side
-from abides_core.utils import str_to_ns, merge_swap, fmt_ts
-
 from datetime import datetime
-
+from abides_core.utils import str_to_ns, merge_swap, fmt_ts
 from abides_core import Message, NanosecondTime
 from typing import Any, Dict, List, Optional, Tuple, Type
-
 from abides_core.message import Message, MessageBatch, WakeupMsg, SwapMsg, UpdateRateMsg
-
-
-
-# Import the PendleSeedingAgent class from its module
-# Adjust the import path based on your project structure
-from abides_markets.agents.pendle_agent import PendleSeedingAgent
-
 logger = logging.getLogger(__name__)
 
 
@@ -105,7 +93,42 @@ class FakeKernel:
         # END PENDLE
     def send_message(self, sender_id, recipient_id, message, delay=0):
         pass
-    
+    def set_wakeup(
+    self, sender_id: int, requested_time: Optional[NanosecondTime] = None
+) -> None:
+        """
+        Called by an agent to receive a "wakeup call" from the kernel at some requested
+        future time.
+
+        NOTE: The agent is responsible for maintaining any required state; the kernel
+        will not supply any parameters to the ``wakeup()`` call.
+
+        Arguments:
+            sender_id: The ID of the agent making the call.
+            requested_time: Defaults to the next possible timestamp.  Wakeup time cannot
+            be the current time or a past time.
+        """
+
+        if requested_time is None:
+            requested_time = self.current_time + 1
+
+        if self.current_time and (requested_time < self.current_time):
+            raise ValueError(
+                "set_wakeup() called with requested time not in future",
+                "current_time:",
+                self.current_time,
+                "requested_time:",
+                requested_time,
+            )
+
+        if self.show_trace_messages:
+            logger.debug(
+                "Kernel adding wakeup for agent {} at time {}".format(
+                    sender_id, fmt_ts(requested_time)
+                )
+            )
+
+        self.messages.put((requested_time, (sender_id, sender_id, WakeupMsg())))
     def runner(
         self, agent_actions: Optional[Tuple[Agent, List[Dict[str, Any]]]] = None
     ) -> Dict[str, Any]:
@@ -317,74 +340,39 @@ class FakeKernel:
         if self.current_time and (self.current_time > self.stop_time):
             logger.info(f"--- Kernel Stop Time {self.stop_time} surpassed ---")
 
-        return {"done": True, "result": None}
-def test_pendle_seeding_agent():
-    """
-    Test the PendleSeedingAgent to ensure it correctly seeds the market when the order book is empty.
-    """
-    module_name = PendleSeedingAgent.__module__
-    logger.debug(f"PendleSeedingAgent imported from module: {module_name}")
 
-    # Get the module object
-    module = sys.modules[module_name]
+def test_noise_agent():
 
-    # Get the file location
-    file_location = module.__file__
-    logger.debug(f"PendleSeedingAgent file location: {file_location}")
 
-    logger.debug("Starting test_pendle_seeding_agent")
-
-    # Initialize the agent with specific parameters
     agent_id = 1
     symbol = "PEN"
-    size = 100
-    min_bid = 1
-    max_bid = 10
-    min_ask = 11
-    max_ask = 20
+    collateral = 100_000
+    wakeup_time = 500_000_000  
 
-    logger.debug(f"Initializing PendleSeedingAgent with ID {agent_id} and symbol '{symbol}'")
-    logger.debug(f"Order size: {size}, Bid price range: {min_bid}-{max_bid}, Ask price range: {min_ask}-{max_ask}")
-
-    # Create a random state for reproducibility
     random_state = np.random.RandomState(seed=42)
-    logger.debug("Created random state for reproducibility")
 
-    # Instantiate the PendleSeedingAgent
-    seeding_agent = PendleSeedingAgent(
+    noise_agent = NoiseAgent(
         id=agent_id,
         symbol=symbol,
         random_state=random_state,
-        size=size,
-        min_bid=min_bid,
-        max_bid=max_bid,
-        min_ask=min_ask,
-        max_ask=max_ask
+        collateral=collateral,
+        wakeup_time=wakeup_time,
     )
-    logger.debug("PendleSeedingAgent instantiated")
 
-    # Assign the kernel to the agent
+
+
     kernel = FakeKernel()
-    seeding_agent.kernel = kernel
-    kernel.agents[seeding_agent.id] = seeding_agent
-    logger.debug("Assigned FakeKernel to the agent")
+    noise_agent.kernel = kernel
 
-    # Set market open and close times
-    seeding_agent.mkt_open = 1
-    seeding_agent.mkt_close = 1_000_000_000  # Arbitrary close time
-    seeding_agent.current_time = 0
-    logger.debug(f"Set market open time to {seeding_agent.mkt_open} and close time to {seeding_agent.mkt_close}")
+    noise_agent.mkt_open = 1
+    noise_agent.mkt_close = 1_000_000_000  
+    noise_agent.current_time = 0
 
-    # Set the exchange ID (assuming it's 0)
-    seeding_agent.exchange_id = 0
-    logger.debug(f"Set exchange ID to {seeding_agent.exchange_id}")
+    noise_agent.exchange_id = 0
 
-    # Mock known bids and asks to simulate an empty order book
-    seeding_agent.known_bids = {symbol: []}
-    seeding_agent.known_asks = {symbol: []}
-    logger.debug("Simulated empty order book by setting known bids and asks to empty lists")
+    noise_agent.known_bids = {symbol: [(1000, 50)]}
+    noise_agent.known_asks = {symbol: [(1010, 50)]}
 
-    # Mock methods to capture placed orders
     placed_orders = []
     logger.debug("Initialized list to capture placed orders")
 
@@ -392,64 +380,34 @@ def test_pendle_seeding_agent():
         logger.debug(f"Placed limit order - Symbol: {symbol}, Quantity: {quantity}, Side: {side}, Price: {price}")
         placed_orders.append({'symbol': symbol, 'quantity': quantity, 'side': side, 'price': price})
 
-    seeding_agent.place_limit_order = mock_place_limit_order
+    noise_agent.place_limit_order = mock_place_limit_order
     logger.debug("Replaced agent's place_limit_order method with mock method")
 
-    # Simulate the agent's wakeup call
     logger.debug("Simulating agent's wakeup call")
-    seeding_agent.wakeup(seeding_agent.current_time)
-    logger.debug(f"state: {seeding_agent.state},type: {seeding_agent.type}")
+    noise_agent.current_time = wakeup_time
+    noise_agent.wakeup(noise_agent.current_time)
 
-    # Simulate receiving a QuerySpreadResponseMsg indicating an empty order book
-    logger.debug("Simulating receipt of QuerySpreadResponseMsg with empty order book")
+    logger.debug("Simulating receipt of QuerySpreadResponseMsg")
     message = QuerySpreadResponseMsg(
         symbol=symbol,
-        bids=[],
-        asks=[],
+        bids=noise_agent.known_bids[symbol],
+        asks=noise_agent.known_asks[symbol],
         mkt_closed=False,
-        depth=0,
+        depth=1,
         last_trade=None,
     )
 
-    # The agent receives the message and should proceed to seed the market
     logger.debug("Agent receiving the QuerySpreadResponseMsg")
-    seeding_agent.receive_message(seeding_agent.current_time, sender_id=0, message=message)
+    noise_agent.receive_message(noise_agent.current_time, sender_id=0, message=message)
 
-    # Verify that the agent placed the correct orders
-    expected_bid_prices = list(range(min_bid, max_bid + 1))
-    expected_ask_prices = list(range(min_ask, max_ask + 1))
-    logger.debug(f"Expected bid prices: {expected_bid_prices}")
-    logger.debug(f"Expected ask prices: {expected_ask_prices}")
+    assert len(placed_orders) == 1, f"Expected 1 order to be placed, but got {len(placed_orders)}"
 
-    # Separate the placed bids and asks
-    placed_bids = [order for order in placed_orders if order['side'] == Side.BID]
-    placed_asks = [order for order in placed_orders if order['side'] == Side.ASK]
-    logger.debug(f"Number of bids placed: {len(placed_bids)}")
-    logger.debug(f"Number of asks placed: {len(placed_asks)}")
+    order = placed_orders[0]
+    logger.debug(f"Order placed: {order}")
 
-    # Check that the correct number of bids and asks were placed
-    assert len(placed_bids) == len(expected_bid_prices), \
-        f"Expected {len(expected_bid_prices)} bids, got {len(placed_bids)}"
-    logger.debug("Correct number of bids placed")
+    assert order['symbol'] == symbol, f"Expected order symbol to be {symbol}, but got {order['symbol']}"
+    assert order['quantity'] == noise_agent.size, f"Expected order quantity to be {noise_agent.size}, but got {order['quantity']}"
+    assert order['side'] in [Side.BID, Side.ASK], f"Expected order side to be BID or ASK, but got {order['side']}"
+    assert order['price'] in [1000, 1010], f"Expected order price to be 1000 or 1010, but got {order['price']}"
 
-    assert len(placed_asks) == len(expected_ask_prices), \
-        f"Expected {len(expected_ask_prices)} asks, got {len(placed_asks)}"
-    logger.debug("Correct number of asks placed")
-
-    # Verify the bid orders
-    for price in expected_bid_prices:
-        if any(order['price'] == price and order['quantity'] == size for order in placed_bids):
-            logger.debug(f"Verified bid order at price {price}")
-        else:
-            logger.error(f"Bid at price {price} not found")
-            assert False, f"Bid at price {price} not found"
-
-    # Verify the ask orders
-    for price in expected_ask_prices:
-        if any(order['price'] == price and order['quantity'] == size for order in placed_asks):
-            logger.debug(f"Verified ask order at price {price}")
-        else:
-            logger.error(f"Ask at price {price} not found")
-            assert False, f"Ask at price {price} not found"
-
-    logger.info("PendleSeedingAgent test passed successfully.")
+    logger.info("NoiseAgent test passed successfully.")

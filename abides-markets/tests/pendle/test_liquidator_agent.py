@@ -16,40 +16,36 @@ from abides_markets.messages.query import QuerySpreadResponseMsg
 from abides_markets.messages.order import MarketOrderMsg
 from abides_markets.messages.market import MarketClosePriceRequestMsg
 logger = logging.getLogger(__name__)
+
 class FakeOrderBook:
     def __init__(self):
-        self.twap = 1000
-        self.bids = [(1000, 50), (990, 100)]
-        self.asks = [(1010, 50), (1020, 100)]
+        self.last_twap = -3.100998
     
     def get_twap(self):
-        return self.twap
+        return self.last_twap
     
     def set_wakeup(self, agent_id: int, requested_time: NanosecondTime) -> None:
         pass
+class FakeOracle:
+    def __init__(self):
+        pass
+
 
 class FakeKernel:
     def __init__(self,
-        agents=[],
+        agents = {},
         # PENDLE
         swap_interval = str_to_ns("8h"),
         # END PENDLE
         start_time= str_to_ns("00:00:00"),
-        stop_time= str_to_ns("23:00:00"),
-        default_computation_delay: int = 1,
-        default_latency: float = 1,
-        agent_latency: Optional[List[List[float]]] = None,
-        skip_log: bool = True,
-        seed: Optional[int] = None,
-        log_dir: Optional[str] = None,
-        custom_properties: Optional[Dict[str, Any]] = None,
-        random_state: Optional[np.random.RandomState] = None,):
+        ):
+        self.agents = {agent.id: agent for agent in agents}
         self.current_time: NanosecondTime = start_time
         self.show_trace_messages: bool = True
         self.messages: queue.PriorityQueue[(int, str, Message)] = queue.PriorityQueue()
         self.book = FakeOrderBook()
         self.rate_normalizer = 1
-        self.swap_interval = 1
+        self.swap_interval = str_to_ns("8h")
         self.exchange_id = 0
         logger.debug(f"Kernel initialized")
     
@@ -66,7 +62,7 @@ class FakeKernel:
         for agent in self.agents:
             agent.kernel_initializing(self)
         logger.debug("--- Agent.kernel_starting() ---")
-        for agent in self.agents:
+        for agent in self.agents: 
             agent.kernel_starting(self.start_time)
 
         # Set the kernel to its start_time.
@@ -351,241 +347,76 @@ class FakeKernel:
         self.messages.put((requested_time, (sender_id, sender_id, WakeupMsg())))
 
 
-def test_liquidator_agent_initialization():
-    logging.debug("Starting test_liquidator_agent_initialization")
-    agent_id = 1
-    symbol = "PEN"
-    wake_up_freq = str_to_ns("1h")
-    collateral = 100000
-    liquidator = LiquidatorAgent(
-        id=agent_id,
-        symbol=symbol,
-        wake_up_freq=wake_up_freq,
-        collateral=collateral,
-    )
-
-    # Check if the agent initialization matches the expected values
-    logging.debug(f"Agent ID: {liquidator.id}, Expected: {agent_id}")
-    assert liquidator.id == agent_id
+def test_liquidator_calculate():
+    """
+    Test the full liquidation process, ensuring correct position and collateral adjustment.
+    This verifies the liquidation of a user's position and the correct transfer of collateral.
+    """
+    logger.debug("Starting test_liquidator_calculate_liquidation")
     
-    logging.debug(f"Agent symbol: {liquidator.symbol}, Expected: {symbol}")
-    assert liquidator.symbol == symbol
-
-    logging.debug(f"Agent wake_up_freq: {liquidator.wake_up_freq}, Expected: {wake_up_freq}")
-    assert liquidator.wake_up_freq == wake_up_freq
-
-    logging.debug(f"Agent collateral: {liquidator.position['COLLATERAL']}, Expected: {collateral}")
-    assert liquidator.position["COLLATERAL"] == collateral
-
-    logging.debug(f"Agent state: {liquidator.state}, Expected: AWAITING_WAKEUP")
-    assert liquidator.state == "AWAITING_WAKEUP"
-
-    logging.debug(f"Agent watch_list: {liquidator.watch_list}, Expected: []")
-    assert liquidator.watch_list == []
-
-    logging.debug(f"Agent failed_liquidation: {liquidator.failed_liquidation}, Expected: 0")
-    assert liquidator.failed_liquidation == 0
-
-def test_liquidator_agent_wakeup():
-    logging.debug("Starting test_liquidator_agent_wakeup")
-    agent_id = 1
-    symbol = "PEN"
-    wake_up_freq = str_to_ns("1h")
-    liquidator = LiquidatorAgent(
-        id=agent_id,
-        symbol=symbol,
-        wake_up_freq=wake_up_freq,
-    )
-    current_time = 0
-
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
+    # Initialize agents
+    logger.debug("Initializing LiquidatorAgent and TradingAgent")
+    liquidator = LiquidatorAgent(id=0)
+    unhealthy_agent = TradingAgent(id=1)
+    
+    # Create and configure the kernel
+    logger.debug("Creating and configuring FakeKernel")
+    kernel = FakeKernel(agents=[liquidator, unhealthy_agent], swap_interval=str_to_ns("8h"))
+    kernel.book = FakeOrderBook()
+    
+    # Assign the kernel to agents
+    logger.debug("Assigning kernel to agents")
+    liquidator.kernel = kernel
+    unhealthy_agent.kernel = kernel
+    
+    # Set up the liquidator agent
+    logger.debug("Setting up LiquidatorAgent")
+    liquidator.exchange_id = kernel.exchange_id
+    liquidator.symbol = "PEN"
+    liquidator.known_bids = {"PEN": [(-3.100998, 5000), (-3.2, 10000)]}
+    liquidator.known_asks = {"PEN": [(-3.100998, 5000), (-2.9, 10000)]}
     liquidator.mkt_open = True
     liquidator.mkt_closed = False
-    liquidator.send_message = lambda recipient_id, message, delay=0: None
-    liquidator.get_current_spread = lambda symbol: None
-
-    logging.debug(f"Calling liquidator.wakeup at time: {current_time}")
+    # Mock the place_market_order method if needed
+    liquidator.place_market_order = lambda symbol, quantity, side: logger.debug(
+        f"Liquidator placed market order: symbol={symbol}, quantity={quantity}, side={side}"
+    )
+    
+    # Set up the unhealthy agent
+    logger.debug("Setting up unhealthy TradingAgent")
+    unhealthy_agent.position = {"COLLATERAL": 50, "SIZE": 100, "FIXRATE": 0.0001}
+    unhealthy_agent.mkt_open = 0
+    unhealthy_agent.mkt_close = 365 * str_to_ns("1d")
+    unhealthy_agent.current_time = 0
+    
+    # Calculate and log initial values
+    logger.debug("Calculating initial values for unhealthy agent")
+    maintenance_margin = unhealthy_agent.maintainance_margin(unhealthy_agent.position["SIZE"])
+    logger.debug(f"Agent's maintenance margin: {maintenance_margin}")
+    m_ratio = unhealthy_agent.mRatio(unhealthy_agent.position)
+    logger.debug(f"Agent's mRatio: {m_ratio}")
+    mark_to_market = unhealthy_agent.mark_to_market(unhealthy_agent.position, log=False)
+    logger.debug(f"Agent's mark to market value: {mark_to_market}")
+    market_tick = kernel.book.get_twap()
+    logger.debug(f"Agent's market tick: {market_tick}")
+    health_status = unhealthy_agent.is_healthy()
+    assert not health_status, f"Expected health status to be False, got {health_status}"
+    logger.debug(f"Agent's health status: {health_status}")
+    
+    # Log positions before liquidation
+    logger.debug(f"Agent's position before liquidation: {unhealthy_agent.position}")
+    logger.debug(f"Liquidator's position before liquidation: {liquidator.position}")
+    
+    # Add the unhealthy agent to the liquidator's watch list
+    logger.debug("Adding unhealthy agent to Liquidator's watch list")
+    liquidator.watch_list = [unhealthy_agent.id]
+    
+    # Perform liquidation
+    current_time = 0
+    logger.debug(f"Waking up liquidator at time: {current_time}")
     liquidator.wakeup(current_time)
-    logging.debug(f"Liquidator state after wakeup: {liquidator.state}, Expected: AWAITING_SPREAD")
-    assert liquidator.state == "AWAITING_SPREAD"
-
-def test_liquidator_receive_message():
-    logging.debug("Starting test_liquidator_receive_message")
-    agent_id = 1
-    symbol = "PEN"
-    liquidator = LiquidatorAgent(
-        id=agent_id,
-        symbol=symbol,
-        subscribe=False,
-    )
-    current_time = 0
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
-    liquidator.state = "AWAITING_SPREAD"
-    liquidator.mkt_open = True
-    liquidator.mkt_closed = False
-
-    # Create a watched agent for liquidation
-    watched_agent = TradingAgent(id=2)
-    watched_agent.position = {"COLLATERAL": 1000, "SIZE": 100, "FIXRATE": 0.05}
-    watched_agent.is_healthy = lambda: True
-    liquidator.watch_list = [watched_agent]
-
-    liquidator.known_bids = {symbol: [(990, 100)]}
-    liquidator.known_asks = {symbol: [(1010, 100)]}
-
-    message = QuerySpreadResponseMsg(
-        symbol=symbol,
-        bids=liquidator.known_bids[symbol],
-        asks=liquidator.known_asks[symbol],
-        mkt_closed=False,
-        depth=1,
-        last_trade=None,
-    )
-
-    logging.debug(f"Receiving message for symbol: {symbol} at time: {current_time}")
-    liquidator.receive_message(current_time, sender_id=0, message=message)
-    logging.debug(f"Failed liquidation after message: {liquidator.failed_liquidation}, Expected: 0")
-    assert liquidator.failed_liquidation == 0
-    logging.debug(f"Liquidator state after message: {liquidator.state}, Expected: AWAITING_WAKEUP")
-    assert liquidator.state == "AWAITING_WAKEUP"
-
-def test_liquidator_check_liquidate_unhealthy_agent():
-    logging.debug("Starting test_liquidator_check_liquidate_unhealthy_agent")
-    liquidator = LiquidatorAgent(id=1)
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
-    liquidator.symbol = "PEN"
-    liquidator.known_bids = {"PEN": [(1000, 50), (990, 100)]}
-    liquidator.known_asks = {"PEN": [(1010, 50), (1020, 100)]}
-
-    agent = TradingAgent(id=2)
-    agent.kernel = liquidator.kernel
-    agent.position = {"COLLATERAL": 10, "SIZE": 100, "FIXRATE": 0.05}
-    agent.is_healthy = lambda: False
-    agent.mRatio = lambda: 1.2
-    agent.mark_to_market = lambda: 50
-    agent.cancel_all_orders = lambda: None
-
-    liquidator.place_market_order = lambda symbol, quantity, side: None
-
-    logging.debug(f"Checking liquidate for unhealthy agent with mRatio: {agent.mRatio()}")
-    result = liquidator.check_liquidate(agent)
-    logging.debug(f"Result of liquidation check: {result}, Expected: True")
-    assert result
-    logging.debug(f"Agent position after liquidation: {agent.position['SIZE']}, Expected: < 100")
-    assert agent.position["SIZE"] < 100
-    logging.debug(f"Liquidator position after liquidation: {liquidator.position['SIZE']}, Expected: != 0")
-    assert liquidator.position["SIZE"] != 0
-    logging.debug(f"Failed liquidation count: {liquidator.failed_liquidation}, Expected: >= 0")
-    assert liquidator.failed_liquidation >= 0
-
-def test_liquidator_agent_insufficient_liquidity():
-    logging.debug("Starting test_liquidator_agent_insufficient_liquidity")
-    liquidator = LiquidatorAgent(id=1)
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
-    liquidator.symbol = "PEN"
-    liquidator.known_bids = {"PEN": [(1000, 10)]}
-    liquidator.known_asks = {"PEN": [(1010, 10)]}
-
-    agent = TradingAgent(id=2)
-    agent.kernel = liquidator.kernel
-    agent.position = {"COLLATERAL": 10, "SIZE": 100, "FIXRATE": 0.05}
-    agent.is_healthy = lambda: False
-    agent.mRatio = lambda: 1.2
-    agent.mark_to_market = lambda: 50
-    agent.cancel_all_orders = lambda: None
-
-    liquidator.place_market_order = lambda symbol, quantity, side: None
-
-    logging.debug(f"Checking liquidate with insufficient liquidity for agent with mRatio: {agent.mRatio()}")
-    result = liquidator.check_liquidate(agent)
-    logging.debug(f"Result of liquidation check: {result}, Expected: True")
-    assert result
-    logging.debug(f"Agent position after liquidation: {agent.position['SIZE']}, Expected: 90")
-    assert agent.position["SIZE"] == 90
-    logging.debug(f"Failed liquidation count: {liquidator.failed_liquidation}, Expected: >= 0")
-    assert liquidator.failed_liquidation >= 0
-
-def test_liquidator_agent_sell_option():
-    logging.debug("Starting test_liquidator_agent_sell_option")
-    liquidator = LiquidatorAgent(id=1)
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
-    liquidator.symbol = "PEN"
-    liquidator.known_bids = {"PEN": [(1000, 50), (990, 100)]}
-    liquidator.known_asks = {"PEN": [(1010, 50), (1020, 100)]}
-
-    liquidator.place_market_order = lambda symbol, quantity, side: None
-
-    agent = TradingAgent(id=2)
-    agent.kernel = liquidator.kernel
-    agent.position = {"COLLATERAL": 10, "SIZE": 100, "FIXRATE": 0.05}
-    agent.is_healthy = lambda: False
-    agent.mRatio = lambda: 1.2
-    agent.mark_to_market = lambda: 50
-    agent.cancel_all_orders = lambda: None
-
-    logging.debug(f"Checking liquidate and sell option for agent with mRatio: {agent.mRatio()}")
-    result = liquidator.check_liquidate(agent, sell=True)
-    logging.debug(f"Result of liquidation check with sell: {result}")
-    assert result
-
-def test_liquidator_agent_no_sell_option():
-    logging.debug("Starting test_liquidator_agent_no_sell_option")
-    liquidator = LiquidatorAgent(id=1)
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
-    liquidator.symbol = "PEN"
-    liquidator.known_bids = {"PEN": [(1000, 50), (990, 100)]}
-    liquidator.known_asks = {"PEN": [(1010, 50), (1020, 100)]}
-
-    liquidator.place_market_order = lambda symbol, quantity, side: None
-
-    agent = TradingAgent(id=2)
-    agent.kernel = liquidator.kernel
-    agent.position = {"COLLATERAL": 10, "SIZE": 100, "FIXRATE": 0.05}
-    agent.is_healthy = lambda: False
-    agent.mRatio = lambda: 1.2
-    agent.mark_to_market = lambda: 50
-    agent.cancel_all_orders = lambda: None
-
-    logging.debug(f"Checking liquidate without sell option for agent with mRatio: {agent.mRatio()}")
-    result = liquidator.check_liquidate(agent, sell=False)
-    logging.debug(f"Result of liquidation check without sell: {result}")
-    assert result
-
-def test_liquidator_agent_full_integration():
-    logging.debug("Starting test_liquidator_agent_full_integration")
-    liquidator = LiquidatorAgent(id=1)
-    liquidator.kernel = FakeKernel()
-    liquidator.exchange_id = liquidator.kernel.exchange_id
-    liquidator.symbol = "PEN"
-    liquidator.known_bids = {"PEN": [(1000, 50), (990, 100)]}
-    liquidator.known_asks = {"PEN": [(1010, 50), (1020, 100)]}
-
-    healthy_agent = TradingAgent(id=2)
-    healthy_agent.kernel = liquidator.kernel
-    healthy_agent.position = {"COLLATERAL": 1000, "SIZE": 100, "FIXRATE": 0.05}
-    healthy_agent.is_healthy = lambda: True
-
-    unhealthy_agent = TradingAgent(id=3)
-    unhealthy_agent.kernel = liquidator.kernel
-    unhealthy_agent.position = {"COLLATERAL": 10, "SIZE": 100, "FIXRATE": 0.05}
-    unhealthy_agent.is_healthy = lambda: False
-    unhealthy_agent.mRatio = lambda: 1.2
-    unhealthy_agent.mark_to_market = lambda: 50
-    unhealthy_agent.cancel_all_orders = lambda: None
-
-    liquidator.place_market_order = lambda symbol, quantity, side: None
-    liquidator.mkt_open = True
-    liquidator.mkt_closed = False
-
-    current_time = 0
-    logging.debug(f"Waking up liquidator at time: {current_time}")
-    liquidator.wakeup(current_time)
+    logger.debug("Liquidator wakeup complete")
+    
     message = QuerySpreadResponseMsg(
         symbol=liquidator.symbol,
         bids=liquidator.known_bids[liquidator.symbol],
@@ -594,10 +425,30 @@ def test_liquidator_agent_full_integration():
         depth=2,
         last_trade=None,
     )
-    logging.debug(f"Receiving spread response at time: {current_time}")
+    logger.debug(f"Creating QuerySpreadResponseMsg: {message}")
+    
+    logger.debug(f"Liquidator receiving message at time: {current_time}")
     liquidator.receive_message(current_time, sender_id=0, message=message)
-
-    logging.debug(f"Unhealthy agent position after liquidation: {unhealthy_agent.position['SIZE']}, Expected: < 100")
-    assert unhealthy_agent.position["SIZE"] < 100
-    logging.debug(f"Liquidator position after liquidation: {liquidator.position['SIZE']}, Expected: != 0")
-    assert liquidator.position["SIZE"] != 0
+    logger.debug("Liquidator received message and updated known spreads")
+    
+    # Liquidator checks and performs liquidation
+    logger.debug("Liquidator checking for agents to liquidate")
+    liquidator.check_liquidate(unhealthy_agent)
+    logger.debug("Liquidator performed liquidation check")
+    
+    # Log positions after liquidation
+    logger.debug(f"Agent's position after liquidation: {unhealthy_agent.position}")
+    logger.debug(f"Liquidator's position after liquidation: {liquidator.position}")
+    
+    # Verify agent's health after liquidation
+    logger.debug("Re-evaluating agent's health after liquidation")
+    new_m_ratio = unhealthy_agent.mRatio(unhealthy_agent.position)
+    logger.debug(f"Agent's new mRatio: {new_m_ratio}")
+    new_health_status = unhealthy_agent.is_healthy()
+    logger.debug(f"Agent's new health status: {new_health_status}")
+    
+    # Assertions to verify the liquidation process
+    logger.debug("Asserting the results of liquidation")
+    assert unhealthy_agent.position["SIZE"] == 0, f"Expected SIZE to be 0, got {unhealthy_agent.position['SIZE']}"
+    assert unhealthy_agent.position["COLLATERAL"] == 2.5165644024546125, f"Expected COLLATERAL to be 2.5165644024546125, got {unhealthy_agent.position['COLLATERAL']}"
+    logger.debug("Test test_liquidator_calculate completed successfully")

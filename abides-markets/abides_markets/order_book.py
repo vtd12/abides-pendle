@@ -161,7 +161,7 @@ class OrderBook:
 
             avg_price = int(round(trade_price / trade_qty))
             logger.debug(f"Avg: {trade_qty} @ ${avg_price:0.4f}")
-            self.owner.logEvent("LAST_TRADE", f"{trade_qty},${avg_price:0.4f}")
+            self.owner.logEvent("LAST_TRADE", f"{trade_qty}, tick {avg_price}")
 
             self.last_trade = avg_price
 

@@ -95,7 +95,7 @@ def str_to_ns(string: str) -> NanosecondTime:
         - "1min" -> 6e10 ns
         - "00:00:30" -> 3e10 ns
     """
-    return pd.to_timedelta(string).to_timedelta64().astype(int)
+    return pd.to_timedelta(string).to_timedelta64().astype(np.int64)
 
 
 def datetime_str_to_ns(string: str) -> NanosecondTime:
