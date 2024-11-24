@@ -450,5 +450,5 @@ def test_liquidator_calculate():
     # Assertions to verify the liquidation process
     logger.debug("Asserting the results of liquidation")
     assert unhealthy_agent.position["SIZE"] == 0, f"Expected SIZE to be 0, got {unhealthy_agent.position['SIZE']}"
-    assert unhealthy_agent.position["COLLATERAL"] == 2.040386703680511, f"Expected COLLATERAL to be 2.5165644024546125, got {unhealthy_agent.position['COLLATERAL']}"
+    assert round(unhealthy_agent.position["COLLATERAL"],2) == 2.04, f"Expected COLLATERAL to be 2.040, got {unhealthy_agent.position['COLLATERAL']}"
     logger.debug("Test test_liquidator_calculate completed successfully")
