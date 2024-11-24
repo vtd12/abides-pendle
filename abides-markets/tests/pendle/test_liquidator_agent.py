@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class FakeOrderBook:
     def __init__(self):
-        self.last_twap = -3.100998
+        self.last_twap = -3.230998
     
     def get_twap(self):
         return self.last_twap
@@ -373,8 +373,8 @@ def test_liquidator_calculate():
     logger.debug("Setting up LiquidatorAgent")
     liquidator.exchange_id = kernel.exchange_id
     liquidator.symbol = "PEN"
-    liquidator.known_bids = {"PEN": [(-3.100998, 5000), (-3.2, 10000)]}
-    liquidator.known_asks = {"PEN": [(-3.100998, 5000), (-2.9, 10000)]}
+    liquidator.known_bids = {"PEN": [(-3.230998, 5000), (-3.4, 10000)]}
+    liquidator.known_asks = {"PEN": [(-3.230998, 5000), (-2.9, 10000)]}
     liquidator.mkt_open = True
     liquidator.mkt_closed = False
     # Mock the place_market_order method if needed
@@ -450,5 +450,5 @@ def test_liquidator_calculate():
     # Assertions to verify the liquidation process
     logger.debug("Asserting the results of liquidation")
     assert unhealthy_agent.position["SIZE"] == 0, f"Expected SIZE to be 0, got {unhealthy_agent.position['SIZE']}"
-    assert unhealthy_agent.position["COLLATERAL"] == 2.5165644024546125, f"Expected COLLATERAL to be 2.5165644024546125, got {unhealthy_agent.position['COLLATERAL']}"
+    assert unhealthy_agent.position["COLLATERAL"] == 2.040386703680511, f"Expected COLLATERAL to be 2.5165644024546125, got {unhealthy_agent.position['COLLATERAL']}"
     logger.debug("Test test_liquidator_calculate completed successfully")

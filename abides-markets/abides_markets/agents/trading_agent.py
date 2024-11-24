@@ -748,7 +748,8 @@ class TradingAgent(FinancialAgent):
 
         self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"], 
                                                                      qty, tick_to_rate(order.fill_price))
-        self.position["COLLATERAL"] += p_merge_pa
+            
+        self.position["COLLATERAL"] += p_merge_pa*self.kernel.rate_normalizer*self.n_payment()
 
         # If this original order is now fully executed, remove it from the open orders list.
         # Otherwise, decrement by the quantity filled just now.  It is _possible_ that due
@@ -769,8 +770,7 @@ class TradingAgent(FinancialAgent):
 
         self.logEvent("POSITION_UPDATED", str(self.position))
         
-        if self.R2():
-            self.logEvent("R2", self.R2())
+        self.logR2()
 
     # PENDLE
     def swap(self, current_time: NanosecondTime, floating_rate: float):
@@ -793,8 +793,10 @@ class TradingAgent(FinancialAgent):
         
         self.logEvent("POSITION_UPDATED", str(self.position))
         
-        if self.R2():
-            self.logEvent("R2", self.R2())
+        self.logR2()
+
+        if self.position["COLLATERAL"] <= 0:
+            self.logEvent("NO_COL", f"Col: {self.position['COLLATERAL']}")
         
         return
     # END PENDLE
@@ -1186,10 +1188,8 @@ class TradingAgent(FinancialAgent):
             market_tick = self.kernel.book.last_twap  # Temp for now
 
         cash = position["COLLATERAL"]
-
-        n_payment = int((self.mkt_close - self.current_time)/self.kernel.swap_interval)
             
-        value = (tick_to_rate(market_tick)-position["FIXRATE"])*self.kernel.rate_normalizer*position["SIZE"]*n_payment
+        value = (tick_to_rate(market_tick)-position["FIXRATE"])*self.kernel.rate_normalizer*position["SIZE"]*self.n_payment()
 
         cash += value
 
@@ -1197,7 +1197,7 @@ class TradingAgent(FinancialAgent):
             self.logEvent(
                 "MARK_TO_MARKET",
                 "{} + {} {} @ ({} - {}) * {} * normalizer = {}".format(
-                    position["COLLATERAL"], position["SIZE"], self.symbol, tick_to_rate(market_tick), position["FIXRATE"], n_payment, cash
+                    position["COLLATERAL"], position["SIZE"], self.symbol, tick_to_rate(market_tick), position["FIXRATE"], self.n_payment(), cash
                 ),
             )
 
@@ -1239,7 +1239,7 @@ class TradingAgent(FinancialAgent):
         )
 
     # PENDLE
-    def maintainance_margin(self, size: Optional[float] = None, size_thresh: List[float] = [20, 100], mm_fac: List[float] = [0.03, 0.06, 0.1]) -> float:
+    def maintainance_margin(self, size: Optional[float] = None, size_thresh: List[float] = [20, 100], mm_fac: List[float] = [0.03, 0.04, 0.05]) -> float:
         if not size:
             size = self.position["SIZE"]
 
@@ -1266,9 +1266,9 @@ class TradingAgent(FinancialAgent):
             position = self.position
 
         MtM = self.mark_to_market(position, log=False) 
-        if MtM < 0:
+        if MtM <= 0:
             return np.inf
-        return self.maintainance_margin(position["SIZE"])/self.mark_to_market(position, log=False)
+        return self.maintainance_margin(position["SIZE"])/MtM
 
     def is_healthy(self):
         return self.mRatio() < 1
@@ -1284,6 +1284,9 @@ class TradingAgent(FinancialAgent):
         self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"],
                                                                                  size, rate)
         self.position["COLLATERAL"] += p_merge_pa
+
+        assert self.position["COLLATERAL"] >= 0
+
         return p_merge_pa
     
     def liquidated(self, d_col, d_size):
@@ -1298,33 +1301,35 @@ class TradingAgent(FinancialAgent):
         self.logEvent("LIQUIDATED", f"Col -{d_col}")
         self.logEvent("POSITION_UPDATED", str(self.position))
 
-        if self.R2():
-            self.logEvent("R2", self.R2())
+        self.logR2()
 
     def logR1(self, notional):
         self.logEvent("R1", notional)
 
     def logR2(self):
-        self.logEvent("R2", self.R2())
+        self.logEvent("R2", [self.R2(), self.position['SIZE']])
 
     def R2(self, position: Optional[Mapping[str, int]]=None) -> int:
         """
-        Agent unhealthy
+        Return the tick where mRatio = 1.
 
         Arguments:
+        position: The position to be evaluated.
         """
         # If no position is provided, self evaluating the current position
         if not position:  
             position = self.position 
         
         mm = self.maintainance_margin(position["SIZE"])
-        n_payment = int((self.mkt_close - self.current_time)/self.kernel.swap_interval)
 
-        if position["SIZE"]*n_payment == 0:
-            return None
+        if position["SIZE"]*self.n_payment() == 0:
+            return np.inf
 
-        sensitive_rate = (mm - position["COLLATERAL"])/(self.kernel.rate_normalizer*position["SIZE"]*n_payment) + position["FIXRATE"]
+        sensitive_rate = (mm - position["COLLATERAL"])/(self.kernel.rate_normalizer*position["SIZE"]*self.n_payment()) + position["FIXRATE"]
 
         sensitive_tick = rate_to_tick(sensitive_rate)
 
         return sensitive_tick
+    
+    def n_payment(self):
+        return np.ceil((self.mkt_close - self.current_time)/self.kernel.swap_interval)

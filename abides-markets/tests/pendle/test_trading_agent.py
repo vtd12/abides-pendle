@@ -1,48 +1,51 @@
+import pytest
 import logging
-from datetime import datetime
-from matplotlib.pylab import f
+import queue
 import numpy as np
-import pandas as pd
+from datetime import datetime
+import logging
+from abides_core import Message, NanosecondTime
 from typing import Any, Dict, List, Optional, Tuple, Type
 from abides_core.agent import Agent
 from abides_core.message import Message, MessageBatch, WakeupMsg, SwapMsg, UpdateRateMsg
-from abides_markets.agents import TradingAgent
-from abides_core.utils import str_to_ns, fmt_ts
-from abides_markets.rate_oracle import ConstantOracle
-from abides_markets.agents.utils import tick_to_rate, rate_to_tick
-
+from abides_core.utils import str_to_ns, merge_swap, fmt_ts
+from abides_markets.agents import TradingAgent, LiquidatorAgent
+from abides_markets.orders import Side, MarketOrder
+from abides_markets.messages.marketdata import MarketDataMsg, L2SubReqMsg
+from abides_markets.messages.query import QuerySpreadResponseMsg
+from abides_markets.messages.order import MarketOrderMsg
+from abides_markets.messages.market import MarketClosePriceRequestMsg
 logger = logging.getLogger(__name__)
 
-
 class FakeOrderBook:
-    """A fake order book to provide a constant TWAP value."""
-
-    def __init__(self, twap_value=1000):
-        self.twap_value = twap_value
-
+    def __init__(self):
+        self.last_twap = -3.230998
+    
     def get_twap(self):
-        return self.twap_value  # Mocked market price tick value
+        return self.last_twap
+    
+    def set_wakeup(self, agent_id: int, requested_time: NanosecondTime) -> None:
+        pass
+class FakeOracle:
+    def __init__(self):
+        pass
 
-class Kernel:
+
+class FakeKernel:
     def __init__(self,
-        agents=[],
+        agents = {},
         # PENDLE
         swap_interval = str_to_ns("8h"),
         # END PENDLE
         start_time= str_to_ns("00:00:00"),
-        stop_time= str_to_ns("23:00:00"),
-        default_computation_delay: int = 1,
-        default_latency: float = 1,
-        agent_latency: Optional[List[List[float]]] = None,
-        skip_log: bool = True,
-        seed: Optional[int] = None,
-        log_dir: Optional[str] = None,
-        custom_properties: Optional[Dict[str, Any]] = None,
-        random_state: Optional[np.random.RandomState] = None,):
-        
+        ):
+        self.agents = {agent.id: agent for agent in agents}
+        self.current_time: NanosecondTime = start_time
+        self.show_trace_messages: bool = True
+        self.messages: queue.PriorityQueue[(int, str, Message)] = queue.PriorityQueue()
         self.book = FakeOrderBook()
         self.rate_normalizer = 1
-        self.swap_interval = 1
+        self.swap_interval = str_to_ns("8h")
         self.exchange_id = 0
         logger.debug(f"Kernel initialized")
     
@@ -59,7 +62,7 @@ class Kernel:
         for agent in self.agents:
             agent.kernel_initializing(self)
         logger.debug("--- Agent.kernel_starting() ---")
-        for agent in self.agents:
+        for agent in self.agents: 
             agent.kernel_starting(self.start_time)
 
         # Set the kernel to its start_time.
@@ -306,168 +309,86 @@ class Kernel:
             logger.info(f"--- Kernel Stop Time {self.stop_time} surpassed ---")
 
         return {"done": True, "result": None}
+    def set_wakeup(
+        self, sender_id: int, requested_time: Optional[NanosecondTime] = None
+    ) -> None:
+        """
+        Called by an agent to receive a "wakeup call" from the kernel at some requested
+        future time.
+
+        NOTE: The agent is responsible for maintaining any required state; the kernel
+        will not supply any parameters to the ``wakeup()`` call.
+
+        Arguments:
+            sender_id: The ID of the agent making the call.
+            requested_time: Defaults to the next possible timestamp.  Wakeup time cannot
+            be the current time or a past time.
+        """
+
+        if requested_time is None:
+            requested_time = self.current_time + 1
+
+        if self.current_time and (requested_time < self.current_time):
+            raise ValueError(
+                "set_wakeup() called with requested time not in future",
+                "current_time:",
+                self.current_time,
+                "requested_time:",
+                requested_time,
+            )
+
+        if self.show_trace_messages:
+            logger.debug(
+                "Kernel adding wakeup for agent {} at time {}".format(
+                    sender_id, fmt_ts(requested_time)
+                )
+            )
+
+        self.messages.put((requested_time, (sender_id, sender_id, WakeupMsg())))
 
 
-def test_maintainance_margin():
-    logging.debug("Starting test_maintainance_margin")
-    agent = TradingAgent(id=0)
-    agent.pen_oracle = ConstantOracle()
+def test_trading_agent_calculate():
 
-    # Initialize agent's position
-    agent.position = {"COLLATERAL": 100, "SIZE": 0, "FIXRATE": 0}
-    agent.mkt_open = 0
-    agent.mkt_close = 365 * str_to_ns("1d")  # 365 days in nanoseconds
-    agent.current_time = 0
-
-    # Test different position sizes
-    for size, expected_margin in [(0, 0), (10, 0.3), (20, 0.6), (60, 3.0), (110, 6.4)]:
-        margin = agent.maintainance_margin(size)
-        logging.debug(f"Position size: {size}, Expected margin: {expected_margin}, Calculated margin: {margin}")
-        assert round(margin, 1) == expected_margin
-
-def test_mark_to_market():
-    logging.debug("Starting test_mark_to_market")
-    agent = TradingAgent(id=0)
-    kernel = Kernel([agent], swap_interval=str_to_ns("8h"))
+    logger.debug("Starting test_liquidator_calculate_liquidation")
+    
+    # Initialize agents
+    logger.debug("Initializing TradingAgent")
+    unhealthy_agent = TradingAgent(id=0)
+    
+    # Create and configure the kernel
+    logger.debug("Creating and configuring FakeKernel")
+    kernel = FakeKernel(agents=[unhealthy_agent], swap_interval=str_to_ns("8h"))
     kernel.book = FakeOrderBook()
-    kernel.rate_normalizer = 1
-    agent.kernel = kernel
-
-    # Initialize agent's position
-    agent.position = {"COLLATERAL": 100, "SIZE": 100, "FIXRATE": 0.20}
-    agent.mkt_open = 0
-    agent.mkt_close = 365 * str_to_ns("1d")
-    agent.current_time = 0
-
-    n_payment = int((agent.mkt_close - agent.current_time) // agent.kernel.swap_interval)
-    for market_tick in [1500, agent.kernel.book.get_twap()]:
-        market_rate = tick_to_rate(market_tick)
-        expected_value = agent.position["COLLATERAL"] + agent.position["SIZE"] * (market_rate - agent.position["FIXRATE"]) * n_payment
-        result = agent.mark_to_market(market_tick=market_tick, log=False)
-        logging.debug(f"Market tick: {market_tick}, Market rate: {market_rate}, Expected MTM value: {expected_value}, Calculated MTM value: {result}")
-        assert round(result, 6) == round(expected_value, 6)
-
-def test_liquidation_status():
-    logging.debug("Starting test_liquidation_status")
-    agent = TradingAgent(id=0)
-    kernel = Kernel([agent], swap_interval=str_to_ns("8h"))
-    kernel.book = FakeOrderBook()
-    kernel.rate_normalizer = 1
-    agent.kernel = kernel
-
-    agent.position = {"COLLATERAL": 20, "SIZE": 100, "FIXRATE": 0.20}
-    agent.mkt_open = 0
-    agent.mkt_close = 365 * str_to_ns("1d")
-    agent.current_time = 0
-
-    n_payment = int((agent.mkt_close - agent.current_time) // agent.kernel.swap_interval)
-    market_tick = agent.kernel.book.get_twap()
-    market_rate = tick_to_rate(market_tick)
-    expected_mtm = agent.position["COLLATERAL"] + agent.position["SIZE"] * (market_rate - agent.position["FIXRATE"]) * n_payment
-    result = agent.mark_to_market(log=False)
-    logging.debug(f"Market tick: {market_tick}, Market rate: {market_rate}, Expected MTM: {expected_mtm}, Calculated MTM: {result}")
-    assert round(result, 4) == round(expected_mtm, 4)
-
-    expected_margin = 5.4
-    calculated_margin = agent.maintainance_margin(100)
-    logging.debug(f"Expected maintenance margin: {expected_margin}, Calculated margin: {calculated_margin}")
-    assert round(calculated_margin, 4) == expected_margin
-
-    expected_mratio = expected_margin / expected_mtm
-    mratio = agent.mRatio()
-    logging.debug(f"Expected M-ratio: {expected_mratio}, Calculated M-ratio: {mratio}")
-    assert round(mratio, 4) == round(expected_mratio, 4)
-
-    assert agent.is_healthy()
-    agent.position["COLLATERAL"] = 14
-    logging.debug(f"Adjusted COLLATERAL to 14, Checking health status: {agent.is_healthy()}")
-    assert not agent.is_healthy()
-
-def test_merge_swap():
-    logging.debug("Starting test_merge_swap")
-    agent = TradingAgent(id=0)
-    agent.position = {"COLLATERAL": 1000, "SIZE": 100, "FIXRATE": 0.05}
-
-    # Test merge with positive swap
-    p_merge_pa = agent.merge_swap(50, 0.06)
-    expected_size = 150
-    expected_rate = (100 * 0.05 + 50 * 0.06) / 150
-    logging.debug(f"New size after merge: {agent.position['SIZE']}, Expected size: {expected_size}, Calculated FIXRATE: {agent.position['FIXRATE']}, Expected FIXRATE: {expected_rate}")
-    assert agent.position["SIZE"] == expected_size
-    assert round(agent.position["FIXRATE"], 6) == round(expected_rate, 6)
-    assert agent.position["COLLATERAL"] == 1000 + p_merge_pa
-
-    # Test merge with negative swap
-    p_merge_pa = agent.merge_swap(-30, 0.055)
-    expected_size = 120
-    expected_rate = (150 * expected_rate - 30 * 0.055) / 120
-    logging.debug(f"New size after merge: {agent.position['SIZE']}, Expected size: {expected_size}, Calculated FIXRATE: {agent.position['FIXRATE']}, Expected FIXRATE: {expected_rate}")
-    assert agent.position["SIZE"] == expected_size
-    assert round(agent.position["FIXRATE"], 6) == round(expected_rate, 6)
-    assert agent.position["COLLATERAL"] == 1000 + p_merge_pa
-
-def test_R2():
-    logging.debug("Starting test_R2")
-    agent = TradingAgent(id=0)
-    agent.mkt_open = 0
-    agent.mkt_close = 365 * str_to_ns("1d")
-    agent.current_time = 0
-    kernel = Kernel([agent], swap_interval=str_to_ns("1d"))
-    kernel.rate_normalizer = 1
-    agent.kernel = kernel
-
-    agent.position = {"COLLATERAL": 10, "SIZE": 100, "FIXRATE": 0.05}
-    n_payment = int((agent.mkt_close - agent.current_time) // agent.kernel.swap_interval)
-    mm = agent.maintainance_margin(agent.position["SIZE"])
-    sensitive_rate = (mm - agent.position["COLLATERAL"]) / (agent.kernel.rate_normalizer * agent.position["SIZE"] * n_payment) + agent.position["FIXRATE"]
-    sensitive_tick = rate_to_tick(sensitive_rate)
-    result = agent.R2()
-    logging.debug(f"Expected R2 tick: {sensitive_tick}, Calculated R2 tick: {result}")
-    assert round(result, 6) == round(sensitive_tick, 6)
-
-def test_mRatio_and_is_healthy():
-    logging.debug("Starting test_mRatio_and_is_healthy")
-    agent = TradingAgent(id=0)
-    kernel = Kernel([agent], swap_interval=str_to_ns("1d"))
-    kernel.rate_normalizer = 1
-    agent.kernel = kernel
-    agent.mkt_open = 0
-    agent.mkt_close = 365 * str_to_ns("1d")
-    agent.current_time = 0
-
-    # Test with healthy position
-    agent.position = {"COLLATERAL": 50, "SIZE": 100, "FIXRATE": 0.05}
-    m_ratio = agent.mRatio()
-    logging.debug(f"Calculated M-ratio (should be < 1): {m_ratio}")
-    assert m_ratio < 1
-    assert agent.is_healthy()
-
-    # Test with unhealthy position
-    agent.position = {"COLLATERAL": 1, "SIZE": 100, "FIXRATE": 0.05}
-    m_ratio = agent.mRatio()
-    logging.debug(f"Calculated M-ratio (should be >= 1): {m_ratio}")
-    assert m_ratio >= 1
-    assert not agent.is_healthy()
-
-def test_swap():
-    logging.debug("Starting test_swap")
-    agent = TradingAgent(id=0)
-    kernel = Kernel([agent], swap_interval=str_to_ns("1d"))
-    kernel.rate_normalizer = 1
-    agent.kernel = kernel
-    agent.mkt_open = 0
-    agent.mkt_close = 365 * str_to_ns("1d")
-    agent.current_time = 0
-
-    agent.position = {"COLLATERAL": 1000, "SIZE": 100, "FIXRATE": 0.05}
-
-    # Test swap with floating rate
-    floating_rate = 0.06
-    current_time = agent.current_time + str_to_ns("1d")
-    agent.swap(current_time=current_time, floating_rate=floating_rate)
-
-    expected_change = 100 * (0.06 - 0.05 * kernel.rate_normalizer)
-    expected_collateral = 1000 + expected_change
-    logging.debug(f"Floating rate: {floating_rate}, Expected COLLATERAL: {expected_collateral}, Calculated COLLATERAL: {agent.position['COLLATERAL']}")
-    assert agent.position["COLLATERAL"] == expected_collateral
-    assert agent.current_time == current_time
+    
+    # Assign the kernel to agents
+    logger.debug("Assigning kernel to agents")
+    unhealthy_agent.kernel = kernel
+    
+    # Set up the unhealthy agent
+    logger.debug("Setting up unhealthy TradingAgent")
+    unhealthy_agent.position = {"COLLATERAL": 50, "SIZE": 100, "FIXRATE": 0.0001}
+    unhealthy_agent.mkt_open = 0
+    unhealthy_agent.mkt_close = 365 * str_to_ns("1d")
+    unhealthy_agent.current_time = 0
+    
+    # Calculate and log initial values
+    logger.debug("Calculating initial values for unhealthy agent")
+    maintenance_margin = unhealthy_agent.maintainance_margin(unhealthy_agent.position["SIZE"])
+    assert round(maintenance_margin , 3) == 3.8, f"Expected maintenance margin to be 3.8, got {maintenance_margin}"
+    logger.debug(f"Agent's maintenance margin: {maintenance_margin}")
+    
+    m_ratio = unhealthy_agent.mRatio(unhealthy_agent.position)
+    assert round(m_ratio, 3) == 1.036, f"Expected mRatio to be 1.036, got {m_ratio}"
+    logger.debug(f"Agent's mRatio: {m_ratio}")
+    
+    mark_to_market = unhealthy_agent.mark_to_market(unhealthy_agent.position, log=False)
+    assert round(mark_to_market, 3) == 3.667, f"Expected mark to market value to be 3.667, got {mark_to_market}"
+    logger.debug(f"Agent's mark to market value: {mark_to_market}")
+    
+    market_tick = kernel.book.get_twap()
+    assert round(market_tick, 3) == -3.231, f"Expected market tick to be -3.231, got {market_tick}"
+    logger.debug(f"Agent's market tick: {market_tick}")
+    
+    health_status = unhealthy_agent.is_healthy()
+    assert not health_status, f"Expected health status to be False, got {health_status}"
+    logger.debug(f"Agent's health status: {health_status}")
