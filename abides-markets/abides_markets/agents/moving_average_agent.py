@@ -5,8 +5,8 @@ from typing import Optional, List
 
 import numpy as np
 from abides_core import Message, NanosecondTime
-from abides_core.messages import QueryLastTradeResponseMsg, QueryLastTradeMsg
-from abides_core.orders import Side
+from ..messages.query import QueryLastTradeResponseMsg, QueryLastTradeMsg
+from ..orders import Side
 
 from .trading_agent import TradingAgent
 from ..generators import OrderSizeGenerator
