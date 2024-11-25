@@ -5,8 +5,8 @@ from typing import Optional, List
 
 import numpy as np
 from abides_core import Message, NanosecondTime
-from ..messages.query import QueryLastTradeResponseMsg, QueryLastTradeMsg
-from ..orders import Side
+from abides_core.messages import QueryLastTradeResponseMsg, QueryLastTradeMsg
+from abides_core.orders import Side
 
 from .trading_agent import TradingAgent
 from ..generators import OrderSizeGenerator
@@ -122,7 +122,7 @@ class MovingAverageAgent(TradingAgent):
                     self.evaluate_strategy(current_time)
                 else:
                     logger.debug(f"{self.name} waiting for more trade data.")
-                
+
                 self.state = "AWAITING_WAKEUP"
 
     def evaluate_strategy(self, current_time: NanosecondTime) -> None:
@@ -172,11 +172,3 @@ class MovingAverageAgent(TradingAgent):
         Define the frequency of wakeups in nanoseconds.
         """
         return self.random_state.randint(low=1_000_000, high=10_000_000)
-
-    def get_last_trade(self, symbol: str) -> None:
-        """
-        Send a message to the exchange agent to request the last trade for the given symbol.
-        """
-        msg = QueryLastTradeMsg(symbol=symbol)
-        self.send_message(exchange_id, msg)  
-        logger.debug(f"{self.name} requested last trade for {symbol}")
