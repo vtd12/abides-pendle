@@ -9,7 +9,6 @@ from abides_markets.messages.query import QuerySpreadResponseMsg
 from abides_markets.orders import Side
 from abides_core.kernel import Kernel
 
-# 配置日志
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -36,12 +35,11 @@ def test_noise_agent():
     """
     logger.debug("Starting test_noise_agent")
 
-    # 初始化 ExchangeAgent（通常为 id=0）
     logger.debug("Initializing ExchangeAgent")
     exchange_agent = ExchangeAgent(
         id=0,
         mkt_open=0,
-        mkt_close=1_000_000_000,  # 调整为合适的市场关闭时间
+        mkt_close=1_000_000_000,  
         symbols=["PEN"],
         name="TestExchange",
         type="ExchangeAgent",
@@ -50,15 +48,14 @@ def test_noise_agent():
         use_metric_tracker=False
     )
 
-    # 设置 ExchangeAgent 的 OrderBook 为 FakeOrderBook
     logger.debug("Setting FakeOrderBook for ExchangeAgent")
     exchange_agent.order_books["PEN"] = FakeOrderBook()
 
-    # 初始化 NoiseAgent（要测试的代理）
+
     agent_id = 1
     symbol = "PEN"
     collateral = 100_000
-    wakeup_time = 500_000_000  # 调整为合适的唤醒时间
+    wakeup_time = 500_000_000  
 
     logger.debug("Initializing NoiseAgent")
     random_state = np.random.RandomState(seed=42)
@@ -70,19 +67,16 @@ def test_noise_agent():
         wakeup_time=wakeup_time,
     )
 
-    # 创建并配置内核，传递所有代理
     logger.debug("Creating and configuring Kernel with ExchangeAgent and NoiseAgent")
     kernel = Kernel(
         agents=[exchange_agent, noise_agent],
-        swap_interval=str_to_ns("8h"),  # 调整为合适的交换间隔
+        swap_interval=str_to_ns("8h"), 
     )
 
-    # Assign kernel to agents
     logger.debug("Assigning kernel to agents")
     noise_agent.kernel = kernel
     exchange_agent.kernel = kernel
 
-    # 设置 NoiseAgent 的属性
     logger.debug("Setting up NoiseAgent attributes")
     noise_agent.mkt_open = 1
     noise_agent.mkt_close = 1_000_000_000
