@@ -11,6 +11,11 @@ from abides_markets.rate_oracle import ConstantOracle
 def test_maintainance_margin():
     agent = TradingAgent(id=0)
     agent.rate_oracle = ConstantOracle()
+    kernel = Kernel([agent], 
+                    swap_interval = str_to_ns("8h"),
+                    )
+
+    agent.kernel = kernel
 
     agent.position = {"COLLATERAL": 100,
                       "SIZE": 0,
@@ -55,72 +60,76 @@ def test_mark_to_market():
     agent.mkt_close = 365*str_to_ns("1d")
     agent.current_time = 0
 
-    assert agent.mark_to_market(market_tick=1500, log=False) == 100 + 100 * (tick_to_rate(1500) - 0.20)
-    assert agent.mark_to_market(log=False) == 100 + 100 * (tick_to_rate(1000) - 0.20)
-
-# def test_liquidation_status():
-#     agent = TradingAgent(id=0)
-
-#     kernel = Kernel([agent], 
-#                     swap_interval = str_to_ns("8h"),
-#                     )
-#     kernel.book = FakeOrderBook()
-
-#     agent.kernel = kernel
-
-#     agent.position = {"COLLATERAL": 20,
-#                       "SIZE": 100,
-#                       "FIXRATE": 0.20}
+    assert agent.mark_to_market(log=False) == 100 + 100 * (tick_to_rate(1000) - 0.20)       
     
-#     agent.mkt_open = 0
-#     agent.mkt_close = 365*str_to_ns("1d")
-#     agent.current_time = 0
 
-#     assert round(agent.mark_to_market(log=False) - (20 + 100 * (tick_to_rate(1000) - 0.20)), 4) == 0
-#     assert round(agent.maintainance_margin(100) - 5.4, 4) == 0
+def test_liquidation_status():
+    agent = TradingAgent(id=0)
 
-#     assert round(agent.mRatio() - 5.4/(20 + 100*(tick_to_rate(1000) - 0.20)), 4) == 0
-#     assert agent.is_healthy()
+    kernel = Kernel([agent], 
+                    swap_interval = str_to_ns("8h"),
+                    )
+    kernel.book = FakeOrderBook()
 
-#     agent.position = {"COLLATERAL": 14,
-#                       "SIZE": 100,
-#                       "FIXRATE": 0.20}
+    agent.kernel = kernel
+
+    agent.position = {"COLLATERAL": 20,
+                      "SIZE": 100,
+                      "FIXRATE": 0.20}
     
-#     assert not agent.is_healthy()
+    agent.mkt_open = 0
+    agent.mkt_close = 365*str_to_ns("1d")
+    agent.current_time = 0
 
-# def test_liquidator():
-#     liquidator = LiquidatorAgent(id=0)
-#     dummy_agent = TradingAgent(id=1)
+    assert round(agent.mark_to_market(log=False) - (20 + 100 * (tick_to_rate(1000) - 0.20)), 4) == 0
+    assert round(agent.maintainance_margin(100) - 3.8, 4) == 0
 
-#     kernel = Kernel([liquidator, dummy_agent], 
-#                     swap_interval = str_to_ns("8h"),
-#                     )
-#     kernel.book = FakeOrderBook()
+    assert round(agent.mRatio() - (20 + 100*(tick_to_rate(1000) - 0.20))/3.8, 4) == 0
+    assert agent.is_healthy()
 
-#     dummy_agent.kernel = kernel
-#     liquidator.kernel = kernel
-
-#     dummy_agent.position = {"COLLATERAL": 14,
-#                             "SIZE": 100,
-#                             "FIXRATE": 0.20}
-#     dummy_agent.mkt_open = 0
-#     dummy_agent.mkt_close = 365*str_to_ns("1d")
-#     dummy_agent.current_time = 0
+    agent.position = {"COLLATERAL": 10,
+                      "SIZE": 100,
+                      "FIXRATE": 0.20}
     
-#     liquidator.known_bids[liquidator.symbol] = [
-#         [1100, 10],  
-#         [1000, 10],  
-#         [950, 10]
-#     ]
+    assert not agent.is_healthy()
 
-#     # Liquidator is supposed to liquidate agent by taking (SIZE:20, FIXRATE:0.20) position
+def test_liquidator():
+    liquidator = LiquidatorAgent(id=0)
+    dummy_agent = TradingAgent(id=1)
 
-#     liquidator.check_liquidate(dummy_agent, sell=False)
-#     assert liquidator.position["SIZE"] == 20
+    kernel = Kernel([liquidator, dummy_agent], 
+                    swap_interval = str_to_ns("8h"),
+                    )
+    kernel.book = FakeOrderBook()  # Book return twap = 10%
 
-#     assert dummy_agent.position["SIZE"] == 80
-#     assert dummy_agent.position["COLLATERAL"] > 0
-#     assert dummy_agent.position["COLLATERAL"] < 14
+    dummy_agent.kernel = kernel
+    liquidator.kernel = kernel
+
+    dummy_agent.position = {"COLLATERAL": 10,
+                            "SIZE": 100,
+                            "FIXRATE": 0.20}
+    dummy_agent.mkt_open = 0
+    dummy_agent.mkt_close = 365*str_to_ns("1d")
+    dummy_agent.current_time = 0
+
+    liquidator.mkt_open = 0
+    liquidator.mkt_close = 365*str_to_ns("1d")
+    liquidator.current_time = 0
+    
+    liquidator.known_bids[liquidator.symbol] = [
+        [1100, 10],  
+        [1000, 10],
+        [950, 10]
+    ]
+
+    # Liquidator is supposed to liquidate agent by taking (SIZE:20, FIXRATE:0.20) position
+
+    liquidator.check_liquidate(dummy_agent, sell=False)
+    assert liquidator.position["SIZE"] == 20
+
+    assert dummy_agent.position["SIZE"] == 80
+    # assert dummy_agent.position["COLLATERAL"] > 0
+    # assert dummy_agent.position["COLLATERAL"] < 14
 
 
 

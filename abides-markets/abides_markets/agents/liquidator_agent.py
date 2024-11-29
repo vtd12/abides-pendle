@@ -72,17 +72,12 @@ class LiquidatorAgent(TradingAgent):
             and self.state == "AWAITING_SPREAD"
             and isinstance(message, QuerySpreadResponseMsg)
         ):
-            sum_before = self.failed_liquidation
-
             liquidated = False
 
             for agent_id in self.watch_list:
                 if self.check_liquidate(self.kernel.agents[agent_id]):  # It should be in term of msg rather than directly like this
                     liquidated = True
                     break  # Only liquidate one agent each time
-
-            new_failed_liquidation = self.failed_liquidation - sum_before
-            self.logEvent("UNLIQUIDATABLE", new_failed_liquidation)
             
             if liquidated:
                 self.set_wakeup(current_time + self.get_quick_wake_frequency())
@@ -111,15 +106,13 @@ class LiquidatorAgent(TradingAgent):
         """
         agent.current_time = self.current_time  # Because this function is not in term of msg
 
+        agent.logMetric()
         if agent.is_healthy():
-            agent.logR1(0)
             return False
         
         if agent.position["COLLATERAL"] <= 0:
             self.logEvent("FAILED_LIQUIDATION_NO_COL", f"AGENT ID: {agent.id}")
             return False
-        
-        # print(agent.position)
 
         self.logEvent("LIQUIDATE", f"AGENT ID: {agent.id}")
 
@@ -127,7 +120,7 @@ class LiquidatorAgent(TradingAgent):
 
         liq_fac_base = 0
         liq_fac_slope = 1
-        liq_ict_fact = liq_fac_base + liq_fac_slope * (1 - 1/mRatio)
+        liq_ict_fact = liq_fac_base + liq_fac_slope * (1 - mRatio)
 
         agent.cancel_all_orders()
 
@@ -152,16 +145,15 @@ class LiquidatorAgent(TradingAgent):
                     break
                 d_size -= ask[1]
 
-                if d_size < agent.position["SIZE"]:
+                if d_size <= agent.position["SIZE"]:
                     d_size = agent.position["SIZE"]
                     break
             
         l = d_size/agent.position["SIZE"]
+        new_position_size = (1-l) * agent.position["SIZE"]
 
         assert l >= 0 and l <= 1
-        self.failed_liquidation += abs((1-l)*agent.position["SIZE"])
-
-        agent.logR1(abs((1-l)*agent.position["SIZE"]))
+        agent.logN1(abs(new_position_size))
 
         if l == 0:
             self.logEvent("FAILED_LIQUIDATION", f"AGENT ID: {agent.id}")
@@ -170,10 +162,10 @@ class LiquidatorAgent(TradingAgent):
         # Transfer the collateral
         p_unrealized = agent.mark_to_market() - agent.position["COLLATERAL"]
         liq_val = l*p_unrealized
-
-        d_col = -liq_val*(1+(liq_ict_fact if liq_val<0 else -liq_ict_fact))
-
-        # d_col = min(agent.position["COLLATERAL"], 0)
+        
+        marginDelta = agent.maintainance_margin() - agent.maintainance_margin(new_position_size)
+        liq_incentive = min(liq_ict_fact, self.mRatio()) * marginDelta
+        d_col = -liq_val + liq_incentive
         
         agent.position["COLLATERAL"] -= d_col
         self.position["COLLATERAL"] += d_col

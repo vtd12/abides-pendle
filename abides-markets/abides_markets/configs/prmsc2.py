@@ -19,7 +19,7 @@ from abides_markets.agents import (
     PendleMarketMakerAgent,
     LiquidatorAgent,
 )
-from abides_markets.models import OrderSizeModel
+from abides_markets.models import OrderSizeModel, NormalOrderSizeModel
 from abides_markets.utils import generate_latency_model
 
 from abides_markets.rate_oracle import BTCOracle, ConstantOracle
@@ -36,7 +36,6 @@ def build_config(
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
-    starting_collateral=100_000,  
     log_orders=True,  # if True log everything
     # 1) Exchange Agent
     book_logging=True,
@@ -44,20 +43,22 @@ def build_config(
     stream_history_length=500,
     exchange_log_orders=None,
     # 2) Noise Agent
-    num_noise_agents=1000,
+    num_noise_agents=20_000,
+    noise_collateral=30_000,  
     # 3) Oracle
     kappa = 0.001,  # 0.1% mean reversion
-    sigma_s = 100,  # The sd of the noise shock
+    sigma_s = 100,  # The sd of the noise
     # 4) Value Agents
-    num_value_agents=100,
-    value_agents_wake_up_freq="300min",
+    num_value_agents=[100, 5, 5],
+    value_agents_wake_up_freq=["5h", "10m", "12h"],
     r_bar=0.10,
+    value_collateral = [100_000, 1_000_000, 10_000_000],
     # 5) Market Maker Agents
     num_mm=2,
-    mm_agents_wake_up_freq="60min",
+    mm_agents_wake_up_freq="10min",  # avg. 5 min check 
     # 6) Liquidator Agents
-    num_liq_agents = 1,
-    liq_agents_wake_up_freq="60min", # avg. 10 min check regularly, each recheck every 1 min after successfully liquidate
+    num_liq_agents = 0,
+    liq_agents_wake_up_freq="5min", 
 ):
     """
     create the background configuration for prmsc02
@@ -73,7 +74,7 @@ def build_config(
     np.random.seed(seed)
 
     # order size model
-    ORDER_SIZE_MODEL = OrderSizeModel()  # NOTE: 90% of order would be $1M notional
+    ORDER_SIZE_MODEL = OrderSizeModel()  # NOTE: 90% of order would be $120_000 notional
 
     # date&time
     MKT_OPEN = int(pd.to_datetime(start_date).to_datetime64())
@@ -104,8 +105,8 @@ def build_config(
     }
 
     driving_oracle = LinearOracle(MKT_OPEN, MKT_CLOSE, symbols, [{"time": 0, "mag": 1000},
-                                                                # {"time": 1/3, "mag": 1500},
-                                                                # {"time": 2/3, "mag": 500},
+                                                                # {"time": 1/31, "mag": 3000},
+                                                                # {"time": 2/31, "mag": 0},
                                                                 {"time": 1, "mag": 2000}
                                                                 ])
 
@@ -145,7 +146,7 @@ def build_config(
                 name="NoiseAgent {}".format(j),
                 type="NoiseAgent",
                 symbol=ticker,
-                collateral=starting_collateral,
+                collateral=noise_collateral,
                 wakeup_time=MKT_OPEN + int((MKT_CLOSE-MKT_OPEN)*np.random.rand()),
                 log_orders=log_orders,
                 order_size_model=ORDER_SIZE_MODEL,
@@ -160,6 +161,7 @@ def build_config(
     agent_types.extend(["NoiseAgent"])
 
     # VALUE AGENT
+    # Type 1
     agents.extend(
         [
             ValueAgent(
@@ -167,19 +169,66 @@ def build_config(
                 name="ValueAgent {}".format(j),
                 type="ValueAgent",
                 symbol=ticker,
-                collateral=starting_collateral,
+                collateral=value_collateral[0],
                 log_orders=log_orders,
                 order_size_model=ORDER_SIZE_MODEL,
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
                 ),
                 r_bar=r_bar,
-                wake_up_freq=str_to_ns(value_agents_wake_up_freq)
+                wake_up_freq=str_to_ns(value_agents_wake_up_freq[0])
             )
-            for j in range(agent_count, agent_count + num_value_agents)
+            for j in range(agent_count, agent_count + num_value_agents[0])
         ]
     )
-    agent_count += num_value_agents
+    agent_count += num_value_agents[0]
+
+    # Type 2
+    agents.extend(
+        [
+            ValueAgent(
+                id=j,
+                name="ValueAgent {}".format(j),
+                type="ValueAgent",
+                symbol=ticker,
+                collateral=value_collateral[1],
+                log_orders=log_orders,
+                order_size_model=ORDER_SIZE_MODEL,
+                random_state=np.random.RandomState(
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
+                r_bar=r_bar,
+                wake_up_freq=str_to_ns(value_agents_wake_up_freq[1])
+            )
+            for j in range(agent_count, agent_count + num_value_agents[1])
+        ]
+    )
+    agent_count += num_value_agents[1]
+
+    # Type 3
+    agents.extend(
+        [
+            ValueAgent(
+                id=j,
+                name="ValueAgent {}".format(j),
+                type="ValueAgent",
+                symbol=ticker,
+                collateral=value_collateral[2],
+                log_orders=log_orders,
+                order_size_model=ORDER_SIZE_MODEL,
+                random_state=np.random.RandomState(
+                    seed=np.random.randint(low=0, high=2**32, dtype="uint64")
+                ),
+                r_bar=r_bar,
+                wake_up_freq=str_to_ns(value_agents_wake_up_freq[2])
+            )
+            for j in range(agent_count, agent_count + num_value_agents[2])
+        ]
+    )
+    agent_count += num_value_agents[2]
+
+    # End all type
+
     agent_types.extend(["ValueAgent"])
 
     # MARKET MAKER AGENT
@@ -190,7 +239,7 @@ def build_config(
                 name="Market Maker Agent {}".format(j),
                 type="PendleMarketMakerAgent",
                 symbol=ticker,
-                collateral=1000*starting_collateral,
+                collateral=1_000_000_000,
                 log_orders=log_orders,
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
@@ -212,7 +261,7 @@ def build_config(
                 name="Liquidator Agent {}".format(j),
                 type="LiquidatorAgent",
                 symbol=ticker,
-                collateral=1000*starting_collateral,
+                collateral=1_000_000_000,
                 log_orders=log_orders,
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")

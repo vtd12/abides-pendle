@@ -249,7 +249,7 @@ class PendleMarketMakerAgent(TradingAgent):
 
         orders = []
 
-        for bid_price in bid_orders:
+        for i, bid_price in enumerate(bid_orders):
             logger.debug(
                 "{}: Placing BUY limit order of size {} @ price {}",
                 self.name,
@@ -258,11 +258,11 @@ class PendleMarketMakerAgent(TradingAgent):
             )
             orders.append(
                 self.create_limit_order(
-                    self.symbol, self.buy_order_size, Side.BID, bid_price
+                    self.symbol, self.buy_order_size*(10-i)/45*20, Side.BID, bid_price
                 )
             )
 
-        for ask_price in ask_orders:
+        for i, ask_price in enumerate(ask_orders):
             logger.debug(
                 "{}: Placing SELL limit order of size {} @ price {}",
                 self.name,
@@ -271,7 +271,7 @@ class PendleMarketMakerAgent(TradingAgent):
             )
             orders.append(
                 self.create_limit_order(
-                    self.symbol, self.sell_order_size, Side.ASK, ask_price
+                    self.symbol, self.sell_order_size**(10-i)/45*20, Side.ASK, ask_price
                 )
             )
 

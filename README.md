@@ -14,6 +14,7 @@
     <a href="#usage">Usage</a>
   </li>
   <li><a href="#markets-configurations">Markets Configurations</a></li>
+  <li><a href="#agent-configurations">Agents Configurations</a></li>
 </ol>
 
 <!-- ABOUT THE PROJECT -->
@@ -73,5 +74,11 @@ There are 2 settings of rate oracle ready to be used. Details in `abides-markets
 * Constant Oracle: An oracle gives a constant funding rate.
 
 * BTC Oracle: An oracle gives the true funding rate of BTCUSDT in Binance in 2023.
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## Agents Configurations
+
+* Market Maker: Record transaction volume within its average sleep time (e.g. it wakes up with rate 10 minutes, then everytime it wakes, it record the transaction volume in the most recent 10 minutes). Place 10 bid orders and 10 ask orders, distance 0.25%, total size = recorded transaction volume. Order size is linearly proportional to the distance to `mid_price` (the closer tick, the bigger size).  
+
 
 <p align="right">(<a href="#top">back to top</a>)</p>

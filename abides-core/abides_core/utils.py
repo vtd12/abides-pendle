@@ -134,6 +134,7 @@ def parse_logs_df(end_state: dict) -> pd.DataFrame:
                 "EventTime": fmt_ts(m[0]),
                 "EventType": m[1],
                 "Event": m[2],
+                "RawTime": m[0]
             }
             event = m.get("Event", None)
             if event == None:
@@ -153,7 +154,7 @@ def parse_logs_df(end_state: dict) -> pd.DataFrame:
             messages.append(m)
         dfs.append(pd.DataFrame(messages))
 
-    return pd.concat(dfs).sort_values(by='EventTime')
+    return pd.concat(dfs).sort_values(by='RawTime')
 
 
 # caching utils: not used by abides but useful to have
