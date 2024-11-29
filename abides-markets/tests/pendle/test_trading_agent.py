@@ -89,6 +89,10 @@ def test_trading_agent_calculate():
     maintenance_margin = unhealthy_agent.maintainance_margin(unhealthy_agent.position["SIZE"])
     assert round(maintenance_margin , 3) == 3.8, f"Expected maintenance margin to be 3.8, got {maintenance_margin}"
     logger.debug(f"Agent's maintenance margin: {maintenance_margin}")
+    
+    mark_to_market = unhealthy_agent.mark_to_market(unhealthy_agent.position)
+    assert round(mark_to_market, 3) == 3.667, f"Expected mark to market to be 0.0, got {mark_to_market}"
+    logger.debug(f"Agent's mark to market: {mark_to_market}")
 
     m_ratio = unhealthy_agent.mRatio(unhealthy_agent.position)
     assert round(m_ratio, 3) == 1.036, f"Expected mRatio to be 1.036, got {m_ratio}"

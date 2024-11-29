@@ -41,6 +41,7 @@ class LiquidatorAgent(TradingAgent):
         self.state = "AWAITING_WAKEUP"
         self.failed_liquidation = 0
 
+
     def kernel_starting(self, start_time: NanosecondTime) -> None:
         super().kernel_starting(start_time)
 
@@ -134,14 +135,13 @@ class LiquidatorAgent(TradingAgent):
         market_tick = self.kernel.book.last_twap
         longing = True if agent.position["SIZE"] > 0 else False  # indicate agent is longing yield
         d_size = 0
-
+        self.market_tick = market_tick
         if longing:  # We need to liquidate by market ask order (selling) (i.e. look at BID wall)
             for bid in self.known_bids[self.symbol]:
                 if bid[0] < market_tick:
                     break
-
                 d_size += bid[1]
-
+                
                 if d_size >= agent.position["SIZE"]:
                     d_size = agent.position["SIZE"]
                     break
@@ -155,9 +155,8 @@ class LiquidatorAgent(TradingAgent):
                 if d_size < agent.position["SIZE"]:
                     d_size = agent.position["SIZE"]
                     break
-            
+        self.d_size = d_size 
         l = d_size/agent.position["SIZE"]
-
         assert l >= 0 and l <= 1
         self.failed_liquidation += abs((1-l)*agent.position["SIZE"])
 
@@ -172,7 +171,8 @@ class LiquidatorAgent(TradingAgent):
         liq_val = l*p_unrealized
 
         d_col = -liq_val*(1+(liq_ict_fact if liq_val<0 else -liq_ict_fact))
-
+ 
+        print(f"liq_val: {liq_val},liq_ict_fact: {liq_ict_fact}, d_col: {d_col}")
         # d_col = min(agent.position["COLLATERAL"], 0)
         
         agent.position["COLLATERAL"] -= d_col
@@ -195,16 +195,20 @@ class LiquidatorAgent(TradingAgent):
         self.logEvent("POSITION_UPDATED", str(self.position))
         
         agent.liquidated(d_col, d_size)
-
+        self.beforesell_position = self.position
+        self.sell_ask = 0
+        self.sell_bid = 0
         # Sell the position immediately
         if sell:
             if d_size > 0:
                 self.place_market_order(self.symbol, d_size, Side.ASK)
+                self.sell_ask = 1
             else:
                 self.place_market_order(self.symbol, -d_size, Side.BID)
+                self.sell_bid = 1
 
         # TODO: Update internal known_bids/asks for the next loop
-
+        self.after_sell_position = self.position
         return True
 
     def get_wake_frequency(self) -> NanosecondTime:
