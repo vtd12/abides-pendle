@@ -74,6 +74,7 @@ class LiquidatorAgent(TradingAgent):
         ):
             if self.position["SIZE"] != 0:  # Only continue liquidate after sell position
                 self.set_wakeup(current_time + self.get_quick_wake_frequency())
+                self.logEvent("WAIT_FOR_SELL", self.position["SIZE"])
             else: 
                 liquidated = False
 
@@ -85,6 +86,7 @@ class LiquidatorAgent(TradingAgent):
                 if liquidated: 
                     self.set_wakeup(current_time + self.get_quick_wake_frequency())
                 else:
+                    self.logEvent("NO_LIQUIDATION")
                     self.set_wakeup(current_time + self.get_wake_frequency())
 
                 self.state = "AWAITING_WAKEUP"
@@ -112,7 +114,7 @@ class LiquidatorAgent(TradingAgent):
         if agent.is_healthy() or agent.position["SIZE"] == 0:
             return False
 
-        self.logEvent("LIQUIDATE", f"AGENT ID: {agent.id}")
+        self.logEvent("LIQUIDATABLE", f"AGENT ID: {agent.id} R1 = {agent.last_R1}")
 
         mRatio = agent.mRatio()
 
@@ -162,7 +164,7 @@ class LiquidatorAgent(TradingAgent):
         liq_val = l*p_unrealized
         
         marginDelta = agent.maintainance_margin() - agent.maintainance_margin(new_position_size)
-        liq_incentive = min(liq_ict_fact, self.mRatio()) * marginDelta
+        liq_incentive = min(liq_ict_fact, mRatio) * marginDelta
         d_col = -liq_val + liq_incentive
         
         agent.position["COLLATERAL"] -= d_col
@@ -183,9 +185,8 @@ class LiquidatorAgent(TradingAgent):
         self.logEvent("SUCCESSFUL_LIQUIDATION", 
                       f"AGENT ID: {agent.id}, SIZE {d_size}")
         
-        self.logEvent("POSITION_UPDATED", str(self.position))
-        
-        agent.liquidated(d_col, d_size)
+        self.position_updated()
+        agent.liquidated(d_col, d_size)  # Also called position_updated here
 
         # Sell the position immediately
         if sell:

@@ -33,11 +33,11 @@ from abides_markets.driving_oracle import ManualOracle
 def build_config(
     seed=int(datetime.now().timestamp() * 1_000_000) % (2**32 - 1),
     start_date="20230101",
-    end_date="20230102",
+    end_date="20230105",
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
-    starting_collateral=10,  
+    starting_collateral=100,  
     log_orders=True,  # if True log everything
     # 1) Exchange Agent
     book_logging=True,
@@ -246,7 +246,7 @@ def build_config(
 
     ##kernel args
     kernelStartTime = MKT_OPEN - str_to_ns("1h")
-    kernelStopTime = MKT_CLOSE + str_to_ns("1h")
+    kernelStopTime = MKT_OPEN + str_to_ns("1d")
     kernelSwapInt = SWAP_INT
 
     # PENDLE

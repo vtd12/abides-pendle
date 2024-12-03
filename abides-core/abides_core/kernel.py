@@ -323,7 +323,7 @@ class Kernel:
             sender_id, recipient_id, message = event
 
             # Periodically print the simulation time and total messages, even if muted.
-            if self.ttl_messages % 100_000 == 0:
+            if self.ttl_messages % 1_000_000 == 0:
                 logger.info(
                     "--- Simulation time: {}, messages processed: {:,}, wallclock elapsed: {:.2f}s ---".format(
                         fmt_ts(self.current_time),

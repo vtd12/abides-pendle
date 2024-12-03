@@ -228,7 +228,7 @@ class PendleMarketMakerAgent(TradingAgent):
 
         bids_to_place = [
             price
-            for price in range(lowest_bid, highest_bid + self.tick_size, self.tick_size)
+            for price in range(highest_bid, lowest_bid - self.tick_size, -self.tick_size)
         ]
         asks_to_place = [
             price
