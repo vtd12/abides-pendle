@@ -258,7 +258,7 @@ class PendleMarketMakerAgent(TradingAgent):
             )
             orders.append(
                 self.create_limit_order(
-                    self.symbol, self.buy_order_size*(10-i)/45*20, Side.BID, bid_price
+                    self.symbol, round(self.buy_order_size*(10-i)), Side.BID, bid_price
                 )
             )
 
@@ -271,7 +271,7 @@ class PendleMarketMakerAgent(TradingAgent):
             )
             orders.append(
                 self.create_limit_order(
-                    self.symbol, self.sell_order_size**(10-i)/45*20, Side.ASK, ask_price
+                    self.symbol, round(self.sell_order_size*(10-i)), Side.ASK, ask_price
                 )
             )
 

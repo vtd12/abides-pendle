@@ -37,7 +37,7 @@ def build_config(
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
-    starting_collateral=1_000,  
+    starting_collateral=10,  
     log_orders=True,  # if True log everything
     # 1) Exchange Agent
     book_logging=True,
@@ -58,7 +58,7 @@ def build_config(
     mm_agents_wake_up_freq="1h",
     # 6) Liquidator Agents
     num_liq_agents = 1,
-    liq_agents_wake_up_freq="1h",
+    liq_agents_wake_up_freq="10min",
 ):
     """
     create the background configuration for rmsc04
@@ -95,7 +95,7 @@ def build_config(
                                       {"time": 1/3, "mag": 1000}, 
                                       {"time": 2/3, "mag": -1000}
                                   ]
-                                   )
+                                   ) 
 
     # Agent configuration
     agent_count, agents, agent_types = 0, [], []

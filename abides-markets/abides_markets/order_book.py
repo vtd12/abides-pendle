@@ -301,8 +301,6 @@ class OrderBook:
                 )
             )
 
-            # logger.info(f"Buy {self.buy_transactions}")
-            # logger.info(f"Sell {self.sell_transactions}")
             assert self.get_twap()  # Update the twap
 
             filled_order = deepcopy(order)

@@ -225,4 +225,4 @@ def rate_to_tick(rate: float) -> int:
     if rate >= 0:
         return int(round(np.log(1+rate)/np.log(1.0001)))
     else:
-        return - int(round(np.log(1-rate)/np.log(1.0001)))
+        return -int(round(np.log(1-rate)/np.log(1.0001)))

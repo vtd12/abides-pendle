@@ -32,7 +32,7 @@ from abides_markets.driving_oracle import ManualOracle, LinearOracle
 def build_config(
     seed=int(datetime.now().timestamp() * 1_000_000) % (2**32 - 1),
     start_date="20230101",
-    end_date="20230201",
+    end_date="20230401",
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
@@ -50,15 +50,15 @@ def build_config(
     sigma_s = 100,  # The sd of the noise
     # 4) Value Agents
     num_value_agents=[100, 5, 5],
-    value_agents_wake_up_freq=["5h", "10m", "12h"],
+    value_agents_wake_up_freq=["5h", "10m", "24h"],
     r_bar=0.10,
     value_collateral = [100_000, 1_000_000, 10_000_000],
     # 5) Market Maker Agents
     num_mm=2,
     mm_agents_wake_up_freq="10min",  # avg. 5 min check 
     # 6) Liquidator Agents
-    num_liq_agents = 0,
-    liq_agents_wake_up_freq="5min", 
+    num_liq_agents = 1,
+    liq_agents_wake_up_freq="2min", 
 ):
     """
     create the background configuration for prmsc02
@@ -171,7 +171,7 @@ def build_config(
                 symbol=ticker,
                 collateral=value_collateral[0],
                 log_orders=log_orders,
-                order_size_model=ORDER_SIZE_MODEL,
+                order_size_model=NormalOrderSizeModel(120_000, 10_000),
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
                 ),
@@ -193,7 +193,7 @@ def build_config(
                 symbol=ticker,
                 collateral=value_collateral[1],
                 log_orders=log_orders,
-                order_size_model=ORDER_SIZE_MODEL,
+                order_size_model=NormalOrderSizeModel(200_000, 20_000),
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
                 ),
@@ -215,7 +215,7 @@ def build_config(
                 symbol=ticker,
                 collateral=value_collateral[2],
                 log_orders=log_orders,
-                order_size_model=ORDER_SIZE_MODEL,
+                order_size_model=NormalOrderSizeModel(10_000_000, 1_000_000),
                 random_state=np.random.RandomState(
                     seed=np.random.randint(low=0, high=2**32, dtype="uint64")
                 ),
@@ -286,7 +286,7 @@ def build_config(
 
     ##kernel args
     kernelStartTime = MKT_OPEN - str_to_ns("1h")
-    kernelStopTime = MKT_CLOSE + str_to_ns("1h")
+    kernelStopTime = MKT_OPEN + str_to_ns("10d")
     kernelSwapInt = SWAP_INT
 
     rate_oracle = BTCOracle(kernelStartTime,

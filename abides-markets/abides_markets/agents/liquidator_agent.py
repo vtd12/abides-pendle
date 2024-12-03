@@ -72,21 +72,24 @@ class LiquidatorAgent(TradingAgent):
             and self.state == "AWAITING_SPREAD"
             and isinstance(message, QuerySpreadResponseMsg)
         ):
-            liquidated = False
-
-            for agent_id in self.watch_list:
-                if self.check_liquidate(self.kernel.agents[agent_id]):  # It should be in term of msg rather than directly like this
-                    liquidated = True
-                    break  # Only liquidate one agent each time
-            
-            if liquidated:
+            if self.position["SIZE"] != 0:  # Only continue liquidate after sell position
                 self.set_wakeup(current_time + self.get_quick_wake_frequency())
-            else:
-                self.set_wakeup(current_time + self.get_wake_frequency())
+            else: 
+                liquidated = False
 
-            self.state = "AWAITING_WAKEUP"
+                for agent_id in self.watch_list:
+                    if self.check_liquidate(self.kernel.agents[agent_id]):  # It should be in term of msg rather than directly like this
+                        liquidated = True
+                        break  # Only liquidate one agent each time
+                
+                if liquidated: 
+                    self.set_wakeup(current_time + self.get_quick_wake_frequency())
+                else:
+                    self.set_wakeup(current_time + self.get_wake_frequency())
 
-        elif (
+                self.state = "AWAITING_WAKEUP"
+
+        elif (  # TODO: Listen to every order
             self.subscribe
             and self.state == "AWAITING_MARKET_DATA"
             and isinstance(message, MarketDataMsg)
@@ -98,7 +101,7 @@ class LiquidatorAgent(TradingAgent):
 
     def check_liquidate(self, agent: TradingAgent, sell: bool = True) -> bool:
         """
-        Check if an agent is liquidatable. Liquidate him if profitable.
+        Check if an agent is liquidatable. Liquidate him if profitable. Return True if liquidate an amount successfully. 
         
         Arguments:
             agent: the agent to be liquidated
@@ -106,12 +109,7 @@ class LiquidatorAgent(TradingAgent):
         """
         agent.current_time = self.current_time  # Because this function is not in term of msg
 
-        agent.logMetric()
-        if agent.is_healthy():
-            return False
-        
-        if agent.position["COLLATERAL"] <= 0:
-            self.logEvent("FAILED_LIQUIDATION_NO_COL", f"AGENT ID: {agent.id}")
+        if agent.is_healthy() or agent.position["SIZE"] == 0:
             return False
 
         self.logEvent("LIQUIDATE", f"AGENT ID: {agent.id}")
@@ -171,7 +169,8 @@ class LiquidatorAgent(TradingAgent):
         self.position["COLLATERAL"] += d_col
 
         # Transfer the position
-        assert self.position["SIZE"] == 0
+        assert self.position["SIZE"] == 0, self.position["SIZE"]
+        
         self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"], 
                                                                         d_size, agent.position["FIXRATE"])
         

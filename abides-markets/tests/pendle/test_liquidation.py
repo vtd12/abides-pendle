@@ -80,6 +80,7 @@ def test_liquidation_status():
     agent.mkt_open = 0
     agent.mkt_close = 365*str_to_ns("1d")
     agent.current_time = 0
+    agent.position_updated()
 
     assert round(agent.mark_to_market(log=False) - (20 + 100 * (tick_to_rate(1000) - 0.20)), 4) == 0
     assert round(agent.maintainance_margin(100) - 3.8, 4) == 0
@@ -90,6 +91,7 @@ def test_liquidation_status():
     agent.position = {"COLLATERAL": 10,
                       "SIZE": 100,
                       "FIXRATE": 0.20}
+    agent.position_updated()
     
     assert not agent.is_healthy()
 

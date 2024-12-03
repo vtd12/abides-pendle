@@ -156,8 +156,9 @@ class TradingAgent(FinancialAgent):
         # as we know.
         self.mkt_closed: bool = False
 
-        # Keep track of the R2 for the plot
-        # self.R2: List[Tuple[NanosecondTime, int]]
+        self.last_R1 = np.inf
+        self.last_R2 = np.inf
+        self.last_mm = 0
 
     # Simulation lifecycle messages.
 
@@ -541,7 +542,11 @@ class TradingAgent(FinancialAgent):
 
         if order is not None:
             self.orders[order.order_id] = deepcopy(order)
-            self.send_message(self.exchange_id, LimitOrderMsg(order))
+            if not self.is_healthy():
+                self.logEvent("FAILED_LIMIT_ORDER", self.last_R1, 
+                              deepcopy_event=False)
+            else:
+                self.send_message(self.exchange_id, LimitOrderMsg(order))
 
             if self.log_orders:
                 self.logEvent("ORDER_SUBMITTED", 
@@ -577,9 +582,12 @@ class TradingAgent(FinancialAgent):
             self.id, self.current_time, symbol, quantity, side, order_id, tag
         )
         if quantity != 0:
-            # TODO: Check margin for market order
-            self.orders[order.order_id] = deepcopy(order)
-            self.send_message(self.exchange_id, MarketOrderMsg(order))
+            if not self.is_healthy():
+                self.logEvent("FAILED_MARKET_ORDER", self.last_R1, 
+                              deepcopy_event=False)
+            else:
+                self.orders[order.order_id] = deepcopy(order)
+                self.send_message(self.exchange_id, MarketOrderMsg(order))
             if self.log_orders:
                 self.logEvent("ORDER_SUBMITTED", 
                               f"{order.side} {order.quantity} {order.symbol} @ MARKET PRICE", 
@@ -768,9 +776,7 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order execution, agent open orders: {self.orders}")
 
-        self.logEvent("POSITION_UPDATED", str(self.position))
-        
-        self.logMetric()
+        self.position_updated()
 
     # PENDLE
     def swap(self, current_time: NanosecondTime, floating_rate: float):
@@ -791,9 +797,7 @@ class TradingAgent(FinancialAgent):
                       f"{round(100*floating_rate/self.rate_normalizer(), 4)} %", 
                       deepcopy_event=False)
         
-        self.logEvent("POSITION_UPDATED", str(self.position))
-        
-        self.logMetric()
+        self.position_updated()
 
         if self.position["COLLATERAL"] <= 0:
             self.logEvent("NO_COL", f"Col: {self.position['COLLATERAL']}")
@@ -879,7 +883,7 @@ class TradingAgent(FinancialAgent):
             f"After order partial cancellation, agent open orders: {self.orders}"
         )
 
-        self.logEvent("POSITION_UPDATED", str(self.position))
+        self.position_updated()
 
     def order_modified(self, order: LimitOrder) -> None:
         """
@@ -908,7 +912,7 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order modification, agent open orders: {self.orders}")
 
-        self.logEvent("POSITION_UPDATED", str(self.position))
+        self.position_updated()
 
     def order_replaced(self, old_order: LimitOrder, new_order: LimitOrder) -> None:
         """
@@ -940,8 +944,7 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order replacement, agent open orders: {self.orders}")
 
-        # After execution, log position.
-        self.logEvent("POSITION_UPDATED", str(self.position))
+        self.position_updated()
 
     def market_closed(self) -> None:
         """
@@ -1271,7 +1274,13 @@ class TradingAgent(FinancialAgent):
         return MtM/self.maintainance_margin(position["SIZE"])
 
     def is_healthy(self):
-        return self.mRatio() >= 1
+        if self.position["SIZE"] == 0 or self.n_payment() == 0:
+            return True if self.position["COLLATERAL"]>=0 else False
+        
+        if self.position["SIZE"] > 0:
+            return self.last_R1 <= self.kernel.book.last_twap
+        else:
+            return self.last_R1 >= self.kernel.book.last_twap
     
     def merge_swap(self, size: float, rate: float):
         """
@@ -1299,17 +1308,10 @@ class TradingAgent(FinancialAgent):
         """
         # After liquidated, log position.
         self.logEvent("LIQUIDATED", f"Col -{d_col}")
-        self.logEvent("POSITION_UPDATED", str(self.position))
-
-        self.logMetric()
-
-    def logMetric(self):
-        self.logEvent("METRIC", [self.position['SIZE'], self.R1(), self.R2()])
-        # self.logEvent("R2", [self.R2(), self.position['SIZE']])
+        self.position_updated()
 
     def logN1(self, size: float):
         self.logEvent("N1", size)
-
 
     def R1(self, position: Optional[Mapping[str, int]]=None) -> int:
         """
@@ -1321,8 +1323,9 @@ class TradingAgent(FinancialAgent):
         # If no position is provided, self evaluating the current position
         if not position:  
             position = self.position 
-        
-        mm = self.maintainance_margin(position["SIZE"])
+            mm = self.last_mm
+        else:
+            mm = self.maintainance_margin(position["SIZE"])
 
         if position["SIZE"]*self.n_payment() == 0:
             return np.inf
@@ -1353,15 +1356,6 @@ class TradingAgent(FinancialAgent):
 
         return sensitive_tick
     
-    def leverage_ratio(self, position: Optional[Mapping[str, int]]=None) -> int:
-        """
-        Ratio position_size/MtM
-        """
-        if not position:  
-            position = self.position 
-
-        return self.mark_to_market(position)/self.size_normalized(position)
-    
     def n_payment(self):
         return np.ceil((self.mkt_close - self.current_time)/self.kernel.swap_interval)
     
@@ -1378,3 +1372,11 @@ class TradingAgent(FinancialAgent):
             position = self.position 
 
         return position["SIZE"]*self.n_payment()*self.rate_normalizer()
+    
+    def position_updated(self):
+        self.logEvent("POSITION_UPDATED", str(self.position))
+        self.last_mm = self.maintainance_margin()
+        
+        self.last_R1 = self.R1()
+        self.last_R2 = self.R2()
+        self.logEvent("METRIC", [self.position['SIZE'], self.last_R1, self.last_R2])
