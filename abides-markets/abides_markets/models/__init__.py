@@ -1,1 +1,1 @@
-from .order_size_model import OrderSizeModel
+from .order_size_model import OrderSizeModel, NormalOrderSizeModel

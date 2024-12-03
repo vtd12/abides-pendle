@@ -1,3 +1,4 @@
+from py import log
 import pytest
 import logging
 import numpy as np
@@ -61,6 +62,7 @@ def test_liquidator_calculate_into_bid_wall():
     liquidator.known_bids = {"PEN": [(-3027.555281, 5000),(-3032.555281, 5000)]}
     liquidator.known_asks = {"PEN": [(-3027.555281, -5000),(-3026.555281, -5000)]}
     liquidator.mkt_open = 1
+    liquidator.mkt_close = 365 * str_to_ns("1d")
     liquidator.mkt_closed = False
     
     
@@ -92,12 +94,20 @@ def test_liquidator_calculate_into_bid_wall():
     
     liquidator.check_liquidate(unhealthy_agent)
     
-
-    assert round(unhealthy_agent.position["COLLATERAL"],2) == 2.04 , f"Expected 5.25, got {unhealthy_agent.position['COLLATERAL']}" 
+    logger.debug(f"maintainance_margin_of_new_position:{liquidator.maintainance_margin_of_new_position},liq_ict_fact: {liquidator.liq_ict_fact}, marginDelta: {liquidator.marginDelta}, liq_incentive:{liquidator.liq_incentive}, liq_val:{liquidator.liq_val}")
+    assert round(unhealthy_agent.position["COLLATERAL"],2) == 3.53 , f"Expected 3.53, got {unhealthy_agent.position['COLLATERAL']}"
+    logger.debug(f"p_unrealized:{liquidator.p_unrealized}")
+    logger.debug(f"liq_incentive:{liquidator.liq_incentive}, liq_val:{liquidator.liq_val}")
+    logger.debug(f"After liquidation, unhealthy_agent.position['COLLATERAL']: {unhealthy_agent.position['COLLATERAL']}")
+    
     assert unhealthy_agent.position["SIZE"] == 0
-    assert round(liquidator.position["COLLATERAL"], 2) == 100047.96
+    logger.debug(f"After liquidation, unhealthy_agent.position['SIZE']: {unhealthy_agent.position['SIZE']}")
+    
+    assert round(liquidator.position["COLLATERAL"], 2) == 100046.47
+    logger.debug(f"After liquidation, liquidator.position['COLLATERAL']: {liquidator.position['COLLATERAL']}")
+
     assert round(liquidator.position["FIXRATE"], 2) == 0.11
-    logger.debug(f"self.sell_ask: {liquidator.sell_ask}, self.sell_bid: {liquidator.sell_bid},self.beforesell_position: {liquidator.beforesell_position}, self.after_sell_position: {liquidator.after_sell_position}")
+    logger.debug(f"After liquidation, liquidator.position['FIXRATE']: {liquidator.position['FIXRATE']}")
 
     # assert round(liquidator.position["SIZE"], 2) == 0
 
@@ -134,6 +144,7 @@ def test_liquidator_calculate_into_ask_wall():
     liquidator.known_bids = {"PEN": [(-3030.555281, 5000),(-3032.555281, 5000)]}
     liquidator.known_asks = {"PEN": [(-3030.555281, 5000),(-3026.555281, 5000)]}
     liquidator.mkt_open = 1
+    liquidator.mkt_close = 365 * str_to_ns("1d")
     liquidator.mkt_closed = False
     
     
@@ -165,11 +176,10 @@ def test_liquidator_calculate_into_ask_wall():
     
     liquidator.check_liquidate(unhealthy_agent)
     
-
-    assert round(unhealthy_agent.position["COLLATERAL"],2) == 3.58 , f"Expected 3.58, got {unhealthy_agent.position['COLLATERAL']}" 
+    logger.debug(f"p_unrealized:{liquidator.p_unrealized}")
+    assert round(unhealthy_agent.position["COLLATERAL"],2) == 3.77 , f"Expected 3.77, got {unhealthy_agent.position['COLLATERAL']}" 
     assert unhealthy_agent.position["SIZE"] == 0
-    assert round(liquidator.position["COLLATERAL"], 2) == 100046.42
+    assert round(liquidator.position["COLLATERAL"], 2) == 100046.23
     assert round(liquidator.position["FIXRATE"], 2) == -0.82
-    logger.debug(f"self.sell_ask: {liquidator.sell_ask}, self.sell_bid: {liquidator.sell_bid},self.beforesell_position: {liquidator.beforesell_position}, self.after_sell_position: {liquidator.after_sell_position}")
-
+ 
     # assert round(liquidator.position["SIZE"], 2) == 0

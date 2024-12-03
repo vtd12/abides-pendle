@@ -116,9 +116,14 @@ class ValueAgent(TradingAgent):
             self.current_time,
             random_state=self.random_state,
         )
-        last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
-
+        last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)
+        # last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
+        self.last_funding_rate = last_funding_rate
+        self.Rot = tick_to_rate(obs_t)
+        self.rt1 = self.r_t
+        self.obs_t = obs_t
         self.r_t = (1 - self.oracle_coef - self.funding_rate_coef)*self.r_t + self.funding_rate_coef*last_funding_rate + self.oracle_coef*tick_to_rate(obs_t)
+        self.r_t2 = self.r_t
         # self.logEvent("NEW ESTIMATE", self.r_t)
 
         return self.r_t
@@ -137,19 +142,19 @@ class ValueAgent(TradingAgent):
             if r_t < tick_to_rate(mid):
                 # fundamental belief that price will go down, place a sell order
                 buy = False
-                p = (
+                p = int(
                     bid
                 )  # submit a market order to sell, limit order inside the spread or deeper in the book
             elif r_t >= tick_to_rate(mid):
                 # fundamental belief that price will go up, buy order
                 buy = True
-                p = (
+                p = int(
                     ask
                 )  # submit a market order to buy, a limit order inside the spread or deeper in the book
         else:
             # initialize randomly
             buy = self.random_state.randint(0, 1 + 1)
-            p = rate_to_tick(r_t)
+            p = int(rate_to_tick(r_t))
 
         # Place the order
         if self.order_size_model is not None:
@@ -159,6 +164,7 @@ class ValueAgent(TradingAgent):
 
         if self.size > 0:
             self.place_limit_order(self.symbol, self.size, side, p)
+
 
     def receive_message(
         self, current_time: NanosecondTime, sender_id: int, message: Message

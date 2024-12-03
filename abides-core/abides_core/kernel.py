@@ -60,6 +60,8 @@ class Kernel:
         log_dir: Optional[str] = None,
         custom_properties: Optional[Dict[str, Any]] = None,
         random_state: Optional[np.random.RandomState] = None,
+        rate_oracle = None,
+        driving_oracle = None
     ) -> None:
         custom_properties = custom_properties or {}
 
@@ -69,7 +71,8 @@ class Kernel:
                 seed=np.random.randint(low=0, high=2 ** 32, dtype="uint64")
             )
         )
-
+        self.rate_oracle = rate_oracle
+        self.driving_oracle = driving_oracle
         # A single message queue to keep everything organized by increasing
         # delivery timestamp.
         self.messages: queue.PriorityQueue[(int, str, Message)] = queue.PriorityQueue()

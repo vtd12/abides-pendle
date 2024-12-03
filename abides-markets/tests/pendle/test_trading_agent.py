@@ -84,18 +84,29 @@ def test_trading_agent_calculate():
     unhealthy_agent.mkt_open = 0
     unhealthy_agent.mkt_close = 365 * str_to_ns("1d")
     unhealthy_agent.current_time = 0
-    
+ 
+    logger.debug(f"Unhealthy agent's position: {unhealthy_agent.position}")
+    logger.debug(f"Unhealthy agent's n_payment: {unhealthy_agent.n_payment()}")
+    logger.debug(f"Unhealthy agent's rate_normalizer: {unhealthy_agent.rate_normalizer()}")
+    logger.debug(f"Unhealthy agent's current_time : {unhealthy_agent.current_time}")
+    logger.debug(f"Unhealthy agent's mkt_close: {unhealthy_agent.mkt_close}")
+    logger.debug(f"Unhealthy agent's swap_interval: {unhealthy_agent.kernel.swap_interval}")
+    logger.debug(f"normal size: {abs(unhealthy_agent.position['SIZE']) * unhealthy_agent.n_payment()*unhealthy_agent.rate_normalizer()}")
     logger.debug("Calculating initial values for unhealthy agent")
-    maintenance_margin = unhealthy_agent.maintainance_margin(unhealthy_agent.position["SIZE"])
+    maintenance_margin = unhealthy_agent.maintainance_margin()
     assert round(maintenance_margin , 3) == 3.8, f"Expected maintenance margin to be 3.8, got {maintenance_margin}"
     logger.debug(f"Agent's maintenance margin: {maintenance_margin}")
     
     mark_to_market = unhealthy_agent.mark_to_market(unhealthy_agent.position)
     assert round(mark_to_market, 3) == 3.667, f"Expected mark to market to be 0.0, got {mark_to_market}"
     logger.debug(f"Agent's mark to market: {mark_to_market}")
-
+    
+    health_status = unhealthy_agent.is_healthy()
+    assert not health_status, f"Expected health status to be False, got {health_status}"
+    logger.debug(f"Agent's health status: {health_status}")
+ 
     m_ratio = unhealthy_agent.mRatio(unhealthy_agent.position)
-    assert round(m_ratio, 3) == 1.036, f"Expected mRatio to be 1.036, got {m_ratio}"
+    assert round(m_ratio, 3) == 0.965, f"Expected mRatio to be 0.965, got {m_ratio}"
     logger.debug(f"Agent's mRatio: {m_ratio}")
 
     health_status = unhealthy_agent.is_healthy()

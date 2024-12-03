@@ -37,7 +37,7 @@ def build_config(
     swap_interval="8h",
     stdout_log_level="INFO",
     ticker="PEN",
-    starting_collateral=100,  
+    starting_collateral=1_000,  
     log_orders=True,  # if True log everything
     # 1) Exchange Agent
     book_logging=True,
@@ -90,7 +90,12 @@ def build_config(
         }
     }
 
-    driving_oracle = ManualOracle(MKT_OPEN, MKT_CLOSE, symbols)
+    driving_oracle = ManualOracle(MKT_OPEN, MKT_CLOSE, symbols,
+                                  [
+                                      {"time": 1/3, "mag": 1000}, 
+                                      {"time": 2/3, "mag": -1000}
+                                  ]
+                                   )
 
     # Agent configuration
     agent_count, agents, agent_types = 0, [], []
