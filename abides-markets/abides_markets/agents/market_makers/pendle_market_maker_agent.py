@@ -228,7 +228,7 @@ class PendleMarketMakerAgent(TradingAgent):
 
         bids_to_place = [
             price
-            for price in range(lowest_bid, highest_bid + self.tick_size, self.tick_size)
+            for price in range(highest_bid, lowest_bid - self.tick_size, -self.tick_size)
         ]
         asks_to_place = [
             price
@@ -258,7 +258,7 @@ class PendleMarketMakerAgent(TradingAgent):
             )
             orders.append(
                 self.create_limit_order(
-                    self.symbol, self.buy_order_size*(10-i)/45*20, Side.BID, bid_price
+                    self.symbol, round(self.buy_order_size*(10-i)), Side.BID, bid_price
                 )
             )
 
@@ -271,7 +271,7 @@ class PendleMarketMakerAgent(TradingAgent):
             )
             orders.append(
                 self.create_limit_order(
-                    self.symbol, self.sell_order_size**(10-i)/45*20, Side.ASK, ask_price
+                    self.symbol, round(self.sell_order_size*(10-i)), Side.ASK, ask_price
                 )
             )
 

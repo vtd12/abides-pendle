@@ -60,8 +60,6 @@ class Kernel:
         log_dir: Optional[str] = None,
         custom_properties: Optional[Dict[str, Any]] = None,
         random_state: Optional[np.random.RandomState] = None,
-        rate_oracle = None,
-        driving_oracle = None
     ) -> None:
         custom_properties = custom_properties or {}
 
@@ -71,8 +69,7 @@ class Kernel:
                 seed=np.random.randint(low=0, high=2 ** 32, dtype="uint64")
             )
         )
-        self.rate_oracle = rate_oracle
-        self.driving_oracle = driving_oracle
+
         # A single message queue to keep everything organized by increasing
         # delivery timestamp.
         self.messages: queue.PriorityQueue[(int, str, Message)] = queue.PriorityQueue()
@@ -326,7 +323,7 @@ class Kernel:
             sender_id, recipient_id, message = event
 
             # Periodically print the simulation time and total messages, even if muted.
-            if self.ttl_messages % 100_000 == 0:
+            if self.ttl_messages % 1_000_000 == 0:
                 logger.info(
                     "--- Simulation time: {}, messages processed: {:,}, wallclock elapsed: {:.2f}s ---".format(
                         fmt_ts(self.current_time),

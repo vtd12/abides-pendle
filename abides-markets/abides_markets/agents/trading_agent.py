@@ -156,8 +156,11 @@ class TradingAgent(FinancialAgent):
         # as we know.
         self.mkt_closed: bool = False
 
-        # Keep track of the R2 for the plot
-        # self.R2: List[Tuple[NanosecondTime, int]]
+        self.last_R1 = np.inf
+        self.last_R2 = np.inf
+        self.last_mm = 0
+        self.n_payment: Optional[int] = None
+        self.rate_normalizer: Optional[float] = None
 
     # Simulation lifecycle messages.
 
@@ -175,6 +178,7 @@ class TradingAgent(FinancialAgent):
         # Find an exchange with which we can place orders.  It is guaranteed
         # to exist by now (if there is one).
         self.exchange_id: int = self.kernel.find_agents_by_type(ExchangeAgent)[0]
+        self.rate_normalizer = self.kernel.rate_normalizer
 
         logger.debug(
             f"Agent {self.id} requested agent of type Agent.ExchangeAgent.  Given Agent ID: {self.exchange_id}"
@@ -281,6 +285,7 @@ class TradingAgent(FinancialAgent):
         if isinstance(message, MarketHoursMsg):
             self.mkt_open = message.mkt_open
             self.mkt_close = message.mkt_close
+            self.n_payment = np.floor((self.mkt_close - self.mkt_open)/self.kernel.swap_interval)
 
             logger.debug("Recorded market open: {}".format(fmt_ts(self.mkt_open)))
             logger.debug("Recorded market close: {}".format(fmt_ts(self.mkt_close)))
@@ -477,18 +482,7 @@ class TradingAgent(FinancialAgent):
             order_rate = tick_to_rate(order.limit_price)
             qty = order.quantity if order.side.is_bid() else -1 * order.quantity
 
-            new_position["SIZE"], new_position["FIXRATE"], _ = merge_swap(new_position["SIZE"], new_position["FIXRATE"], 
-                                                                        qty, order_rate)
-            
-
-            # TODO: Check open margin for limit order
-            # if self.mark_to_market(new_position) < 0:
-            #     logger.debug(
-            #         "TradingAgent ignored limit order due to at-risk constraints: {}\n{}".format(
-            #             order, self.position
-            #         )
-            #     )
-            #     return
+            # Open margin is checked in place_limit_order
                 
             return order
 
@@ -541,7 +535,11 @@ class TradingAgent(FinancialAgent):
 
         if order is not None:
             self.orders[order.order_id] = deepcopy(order)
-            self.send_message(self.exchange_id, LimitOrderMsg(order))
+            if not self.is_healthy():
+                self.logEvent("FAILED_LIMIT_ORDER", self.last_R1, 
+                              deepcopy_event=False)
+            else:
+                self.send_message(self.exchange_id, LimitOrderMsg(order))
 
             if self.log_orders:
                 self.logEvent("ORDER_SUBMITTED", 
@@ -577,9 +575,12 @@ class TradingAgent(FinancialAgent):
             self.id, self.current_time, symbol, quantity, side, order_id, tag
         )
         if quantity != 0:
-            # TODO: Check margin for market order
-            self.orders[order.order_id] = deepcopy(order)
-            self.send_message(self.exchange_id, MarketOrderMsg(order))
+            if not self.is_healthy():
+                self.logEvent("FAILED_MARKET_ORDER", self.last_R1, 
+                              deepcopy_event=False)
+            else:
+                self.orders[order.order_id] = deepcopy(order)
+                self.send_message(self.exchange_id, MarketOrderMsg(order))
             if self.log_orders:
                 self.logEvent("ORDER_SUBMITTED", 
                               f"{order.side} {order.quantity} {order.symbol} @ MARKET PRICE", 
@@ -746,10 +747,14 @@ class TradingAgent(FinancialAgent):
         # At the very least, we must update position at execution time.
         qty = order.quantity if order.side.is_bid() else -1 * order.quantity
 
+        # self.logEvent("SWAP_INFO", f"{qty}, {tick_to_rate(order.fill_price)}")
         self.position["SIZE"], self.position["FIXRATE"], p_merge_pa = merge_swap(self.position["SIZE"], self.position["FIXRATE"], 
                                                                      qty, tick_to_rate(order.fill_price))
             
-        self.position["COLLATERAL"] += p_merge_pa*self.rate_normalizer()*self.n_payment()
+        self.position["COLLATERAL"] += p_merge_pa*self.rate_normalizer*self.n_payment
+        # self.logEvent("INFO", f"{p_merge_pa}, {self.rate_normalizer}, {self.n_payment}" )
+
+        self.position_updated()
 
         # If this original order is now fully executed, remove it from the open orders list.
         # Otherwise, decrement by the quantity filled just now.  It is _possible_ that due
@@ -768,10 +773,6 @@ class TradingAgent(FinancialAgent):
 
         logger.debug(f"After order execution, agent open orders: {self.orders}")
 
-        self.logEvent("POSITION_UPDATED", str(self.position))
-        
-        self.logMetric()
-
     # PENDLE
     def swap(self, current_time: NanosecondTime, floating_rate: float):
         """
@@ -786,17 +787,14 @@ class TradingAgent(FinancialAgent):
         """
         self.current_time = current_time
 
-        self.position["COLLATERAL"] += self.position["SIZE"]*(floating_rate - self.position["FIXRATE"]*self.rate_normalizer())
+        self.position["COLLATERAL"] += self.position["SIZE"]*(floating_rate - self.position["FIXRATE"]*self.rate_normalizer)
         self.logEvent("SWAP", 
-                      f"{round(100*floating_rate/self.rate_normalizer(), 4)} %", 
+                      f"{round(100*floating_rate/self.rate_normalizer, 4)} %", 
                       deepcopy_event=False)
+        self.n_payment -= 1
+        assert self.n_payment >= 0, self.n_payment
         
-        self.logEvent("POSITION_UPDATED", str(self.position))
-        
-        self.logMetric()
-
-        if self.position["COLLATERAL"] <= 0:
-            self.logEvent("NO_COL", f"Col: {self.position['COLLATERAL']}")
+        self.position_updated()
         
         return
     # END PENDLE
@@ -879,8 +877,6 @@ class TradingAgent(FinancialAgent):
             f"After order partial cancellation, agent open orders: {self.orders}"
         )
 
-        self.logEvent("POSITION_UPDATED", str(self.position))
-
     def order_modified(self, order: LimitOrder) -> None:
         """
         Handles OrderModified messages from an exchange agent.
@@ -907,8 +903,6 @@ class TradingAgent(FinancialAgent):
             warnings.warn("Execution received for order not in orders list: {order}")
 
         logger.debug(f"After order modification, agent open orders: {self.orders}")
-
-        self.logEvent("POSITION_UPDATED", str(self.position))
 
     def order_replaced(self, old_order: LimitOrder, new_order: LimitOrder) -> None:
         """
@@ -939,9 +933,6 @@ class TradingAgent(FinancialAgent):
         self.orders[new_order.order_id] = new_order
 
         logger.debug(f"After order replacement, agent open orders: {self.orders}")
-
-        # After execution, log position.
-        self.logEvent("POSITION_UPDATED", str(self.position))
 
     def market_closed(self) -> None:
         """
@@ -1240,24 +1231,23 @@ class TradingAgent(FinancialAgent):
 
     # PENDLE
     def maintainance_margin(self, size: Optional[float] = None, size_thresh: List[float] = [20, 100], mm_fac: List[float] = [0.03, 0.04, 0.05]) -> float:
-        if not size:
+        if size == None:
             size = self.position["SIZE"]
 
-        size = abs(size)*self.n_payment()*self.rate_normalizer()  # Convert to positive
-        time_to_maturity = (self.mkt_close - self.current_time)/(365*str_to_ns("1d"))
+        size = abs(size)*self.n_payment*self.rate_normalizer  # Convert to positive
         mm = 0
 
         for i in range(len(size_thresh)):
             if size >= size_thresh[i]:
                 surplus_size = size_thresh[i] if i==0 else size_thresh[i]-size_thresh[i-1]
-                mm += mm_fac[i]*surplus_size*time_to_maturity
+                mm += mm_fac[i]*surplus_size
             else:
                 surplus_size = size if i==0 else size-size_thresh[i-1]
-                mm += mm_fac[i]*surplus_size*time_to_maturity
+                mm += mm_fac[i]*surplus_size
                 return mm
             
         surplus_size = size-size_thresh[-1]
-        mm += mm_fac[len(size_thresh)]*surplus_size*time_to_maturity
+        mm += mm_fac[len(size_thresh)]*surplus_size
         
         return mm
         
@@ -1266,12 +1256,18 @@ class TradingAgent(FinancialAgent):
             position = self.position
 
         MtM = self.mark_to_market(position, log=False) 
-        if position["SIZE"] == 0 or self.n_payment() == 0:
+        if position["SIZE"] == 0 or self.n_payment == 0:
             return np.inf if MtM>=0 else -np.inf
         return MtM/self.maintainance_margin(position["SIZE"])
 
     def is_healthy(self):
-        return self.mRatio() >= 1
+        if self.position["SIZE"] == 0 or self.n_payment == 0:
+            return True if self.position["COLLATERAL"]>=0 else False
+        
+        if self.position["SIZE"] > 0:
+            return self.last_R1 <= self.kernel.book.last_twap
+        else:
+            return self.last_R1 >= self.kernel.book.last_twap
     
     def merge_swap(self, size: float, rate: float):
         """
@@ -1299,17 +1295,10 @@ class TradingAgent(FinancialAgent):
         """
         # After liquidated, log position.
         self.logEvent("LIQUIDATED", f"Col -{d_col}")
-        self.logEvent("POSITION_UPDATED", str(self.position))
-
-        self.logMetric()
-
-    def logMetric(self):
-        self.logEvent("METRIC", [self.position['SIZE'], self.R1(), self.R2()])
-        # self.logEvent("R2", [self.R2(), self.position['SIZE']])
+        self.position_updated()
 
     def logN1(self, size: float):
         self.logEvent("N1", size)
-
 
     def R1(self, position: Optional[Mapping[str, int]]=None) -> int:
         """
@@ -1321,10 +1310,11 @@ class TradingAgent(FinancialAgent):
         # If no position is provided, self evaluating the current position
         if not position:  
             position = self.position 
-        
-        mm = self.maintainance_margin(position["SIZE"])
+            mm = self.last_mm
+        else:
+            mm = self.maintainance_margin(position["SIZE"])
 
-        if position["SIZE"]*self.n_payment() == 0:
+        if position["SIZE"]*self.n_payment == 0:
             return np.inf
 
         sensitive_rate = (mm - position["COLLATERAL"])/self.size_normalized(position) + position["FIXRATE"]
@@ -1344,7 +1334,7 @@ class TradingAgent(FinancialAgent):
         if not position:  
             position = self.position 
 
-        if position["SIZE"]*self.n_payment() == 0:
+        if position["SIZE"]*self.n_payment == 0:
             return np.inf
 
         sensitive_rate = -position["COLLATERAL"]/(self.size_normalized(position)) + position["FIXRATE"]
@@ -1353,31 +1343,20 @@ class TradingAgent(FinancialAgent):
 
         return sensitive_tick
     
-    def leverage_ratio(self, position: Optional[Mapping[str, int]]=None) -> int:
-        """
-        Ratio position_size/MtM
-        """
-        if not position:  
-            position = self.position 
-
-        return self.mark_to_market(position)/self.size_normalized(position)
-    
-    def n_payment(self):
-        if self.mkt_close is None:
-            raise ValueError("mkt_close cannot be None")
-        return np.ceil((self.mkt_close - self.current_time) / self.kernel.swap_interval)
-        # return np.ceil((self.mkt_close - self.current_time)/self.kernel.swap_interval)
-    
-    def rate_normalizer(self):
-        """
-        Return the fraction of each payment compare to a year. Example: If there are 100 payments in a year then normalizer = 0.01
-        """
-        
-        return self.kernel.rate_normalizer
-    
     def size_normalized(self, position: Optional[Mapping[str, int]]=None):
         # If no position is provided, self evaluating the current position
         if not position:  
             position = self.position 
 
-        return position["SIZE"]*self.n_payment()*self.rate_normalizer()
+        return position["SIZE"]*self.n_payment*self.rate_normalizer
+    
+    def position_updated(self):
+        self.logEvent("POSITION_UPDATED", str(self.position))
+        self.last_mm = self.maintainance_margin()
+        
+        self.last_R1 = self.R1()
+        self.last_R2 = self.R2()
+        self.logEvent("METRIC", [self.position['SIZE'], self.last_R1, self.last_R2])
+        
+    def get_wake_frequency(self) -> NanosecondTime:
+        return self.random_state.randint(low=0, high=100)

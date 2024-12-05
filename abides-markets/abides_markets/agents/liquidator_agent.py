@@ -106,7 +106,7 @@ class LiquidatorAgent(TradingAgent):
         """
         agent.current_time = self.current_time  # Because this function is not in term of msg
 
-        agent.logMetric()
+        # agent.logMetric()
         if agent.is_healthy():
             return False
         
