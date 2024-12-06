@@ -534,11 +534,11 @@ class TradingAgent(FinancialAgent):
         )
 
         if order is not None:
-            self.orders[order.order_id] = deepcopy(order)
             if not self.is_healthy():
                 self.logEvent("FAILED_LIMIT_ORDER", self.last_R1, 
                               deepcopy_event=False)
             else:
+                self.orders[order.order_id] = deepcopy(order)
                 self.send_message(self.exchange_id, LimitOrderMsg(order))
 
             if self.log_orders:

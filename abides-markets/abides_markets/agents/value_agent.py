@@ -46,9 +46,6 @@ class ValueAgent(TradingAgent):
         self.r_t: float = r_bar
         self.wake_up_freq: NanosecondTime = wake_up_freq
 
-        self.size: Optional[int] = (
-            self.random_state.randint(20, 50) if order_size_model is None else None
-        )
         self.order_size_model = order_size_model  # Probabilistic model for order size
 
         self.funding_rate_coef: float = coef[0]
@@ -152,13 +149,14 @@ class ValueAgent(TradingAgent):
             p = rate_to_tick(r_t)
 
         # Place the order
-        if self.order_size_model is not None:
-            self.size = self.order_size_model.sample(random_state=self.random_state)
+        percentage = self.order_size_model.sample(random_state=self.random_state)
+        MtM = self.mark_to_market()
+        size = int(percentage*MtM/(0.05*self.n_payment*self.rate_normalizer))
 
         side = Side.BID if buy == 1 else Side.ASK
 
-        if self.size > 0:
-            self.place_limit_order(self.symbol, self.size, side, p)
+        if size > 0:
+            self.place_limit_order(self.symbol, size, side, p)
 
     def receive_message(
         self, current_time: NanosecondTime, sender_id: int, message: Message
