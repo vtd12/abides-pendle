@@ -118,7 +118,7 @@ class LiquidatorAgent(TradingAgent):
 
         mRatio = agent.mRatio()
 
-        liq_fac_base = 0
+        liq_fac_base = 0.1
         liq_fac_slope = 1
         liq_ict_fact = liq_fac_base + liq_fac_slope * (1 - mRatio)
 
