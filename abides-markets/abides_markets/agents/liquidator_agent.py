@@ -165,13 +165,13 @@ class LiquidatorAgent(TradingAgent):
         liq_val = l*p_unrealized
         self.p_unrealized = p_unrealized
         marginDelta = agent.maintainance_margin() - agent.maintainance_margin(new_position_size+1e-6)
-        liq_incentive = min(liq_ict_fact, self.mRatio()) * marginDelta
+        liq_incentive = min(liq_ict_fact, mRatio) * marginDelta
         
         self.new_position_size = new_position_size+1e-6
         self.maintainance_margin_of_new_position = agent.maintainance_margin(new_position_size+1e-6)
         self.liq_ict_fact = liq_ict_fact
         self.marginDelta = marginDelta
-        self.liq_incentive = liq_incentive
+        self.liq_incentive = liq_incentive 
         self.liq_val = liq_val
         d_col = -liq_val + liq_incentive
 
