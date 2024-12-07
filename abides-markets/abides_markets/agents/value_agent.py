@@ -46,9 +46,6 @@ class ValueAgent(TradingAgent):
         self.r_t: float = r_bar
         self.wake_up_freq: NanosecondTime = wake_up_freq
 
-        self.size: Optional[int] = (
-            self.random_state.randint(20, 50) if order_size_model is None else None
-        )
         self.order_size_model = order_size_model  # Probabilistic model for order size
 
         self.funding_rate_coef: float = coef[0]
@@ -84,7 +81,7 @@ class ValueAgent(TradingAgent):
                 self.trading = True
 
                 # Time to start trading!
-                logger.debug("{} is ready to start trading now.".format(self.name))
+                logger.debug("{} is ready to start trading now.", self.name)
 
         # Steady state wakeup behavior starts here.
 
@@ -116,14 +113,9 @@ class ValueAgent(TradingAgent):
             self.current_time,
             random_state=self.random_state,
         )
-        last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)
-        # last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
-        self.last_funding_rate = last_funding_rate
-        self.Rot = tick_to_rate(obs_t)
-        self.rt1 = self.r_t
-        self.obs_t = obs_t
+        last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
+
         self.r_t = (1 - self.oracle_coef - self.funding_rate_coef)*self.r_t + self.funding_rate_coef*last_funding_rate + self.oracle_coef*tick_to_rate(obs_t)
-        self.r_t2 = self.r_t
         # self.logEvent("NEW ESTIMATE", self.r_t)
 
         return self.r_t
@@ -142,29 +134,29 @@ class ValueAgent(TradingAgent):
             if r_t < tick_to_rate(mid):
                 # fundamental belief that price will go down, place a sell order
                 buy = False
-                p = int(
+                p = (
                     bid
                 )  # submit a market order to sell, limit order inside the spread or deeper in the book
             elif r_t >= tick_to_rate(mid):
                 # fundamental belief that price will go up, buy order
                 buy = True
-                p = int(
+                p = (
                     ask
                 )  # submit a market order to buy, a limit order inside the spread or deeper in the book
         else:
             # initialize randomly
             buy = self.random_state.randint(0, 1 + 1)
-            p = int(rate_to_tick(r_t))
+            p = rate_to_tick(r_t)
 
         # Place the order
-        if self.order_size_model is not None:
-            self.size = self.order_size_model.sample(random_state=self.random_state)
+        percentage = self.order_size_model.sample(random_state=self.random_state)
+        MtM = self.mark_to_market()
+        size = int(percentage*MtM/(0.05*self.n_payment*self.rate_normalizer))
 
         side = Side.BID if buy == 1 else Side.ASK
 
-        if self.size > 0:
-            self.place_limit_order(self.symbol, self.size, side, p)
-
+        if size > 0:
+            self.place_limit_order(self.symbol, size, side, p)
 
     def receive_message(
         self, current_time: NanosecondTime, sender_id: int, message: Message

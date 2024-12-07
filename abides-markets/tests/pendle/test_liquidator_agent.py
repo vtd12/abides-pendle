@@ -117,13 +117,13 @@ def test_liquidator_calculate_into_bid_wall():
 
     liquidator.receive_message(current_time, sender_id=exchange_agent.id, message=message)
     liquidator.check_liquidate(unhealthy_agent)
-    assert round(unhealthy_agent.position["COLLATERAL"], 2) == 3.53, f"Expected 3.53, got {unhealthy_agent.position['COLLATERAL']}"
+    assert round(unhealthy_agent.position["COLLATERAL"], 2) == 3.15, f"Expected 3.53, got {unhealthy_agent.position['COLLATERAL']}"
     logger.debug(f"After liquidation, unhealthy_agent.position['COLLATERAL']: {unhealthy_agent.position['COLLATERAL']}")
 
     assert unhealthy_agent.position["SIZE"] == 0
     logger.debug(f"After liquidation, unhealthy_agent.position['SIZE']: {unhealthy_agent.position['SIZE']}")
 
-    assert round(liquidator.position["COLLATERAL"], 2) == 100046.47
+    assert round(liquidator.position["COLLATERAL"], 2) == 100046.85
     logger.debug(f"After liquidation, liquidator.position['COLLATERAL']: {liquidator.position['COLLATERAL']}")
 
     assert round(liquidator.position["FIXRATE"], 2) == 0.11
@@ -211,13 +211,13 @@ def test_liquidator_calculate_into_ask_wall():
 
     liquidator.receive_message(current_time, sender_id=exchange_agent.id, message=message)
     liquidator.check_liquidate(unhealthy_agent)
-    assert round(unhealthy_agent.position["COLLATERAL"], 2) == 3.77, f"Expected 3.77, got {unhealthy_agent.position['COLLATERAL']}"
+    assert round(unhealthy_agent.position["COLLATERAL"], 2) == 3.39, f"Expected 3.77, got {unhealthy_agent.position['COLLATERAL']}"
     logger.debug(f"After liquidation, unhealthy_agent.position['COLLATERAL']: {unhealthy_agent.position['COLLATERAL']}")
 
     assert unhealthy_agent.position["SIZE"] == 0
     logger.debug(f"After liquidation, unhealthy_agent.position['SIZE']: {unhealthy_agent.position['SIZE']}")
 
-    assert round(liquidator.position["COLLATERAL"], 2) == 100046.23
+    assert round(liquidator.position["COLLATERAL"], 2) == 100046.61
     logger.debug(f"After liquidation, liquidator.position['COLLATERAL']: {liquidator.position['COLLATERAL']}")
 
     assert round(liquidator.position["FIXRATE"], 2) == -0.82

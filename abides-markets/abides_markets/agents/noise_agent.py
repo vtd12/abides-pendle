@@ -50,10 +50,6 @@ class NoiseAgent(TradingAgent):
         # units have passed.
         self.prev_wake_time: Optional[NanosecondTime] = None
 
-        self.size: Optional[int] = (
-            self.random_state.randint(20, 50) if order_size_model is None else None
-        )
-
         self.order_size_model = order_size_model  # Probabilistic model for order size
 
     def kernel_starting(self, start_time: NanosecondTime) -> None:
@@ -82,8 +78,7 @@ class NoiseAgent(TradingAgent):
                 self.trading = True
 
                 # Time to start trading!
-                logger.debug("{} is ready to start trading now.".format(self.name))
-
+                logger.debug("{} is ready to start trading now.", self.name)
 
         # Steady state wakeup behavior starts here.
 
@@ -114,14 +109,15 @@ class NoiseAgent(TradingAgent):
 
         bid, bid_vol, ask, ask_vol = self.get_known_bid_ask(self.symbol)
 
-        if self.order_size_model is not None:
-            self.size = self.order_size_model.sample(random_state=self.random_state)
+        percentage = self.order_size_model.sample(random_state=self.random_state)
+        MtM = self.mark_to_market()
+        size = int(percentage*MtM/(0.05*self.n_payment*self.rate_normalizer))
 
-        if self.size > 0:
+        if size > 0:
             if buy_indicator == 1 and ask:
-                self.place_limit_order(self.symbol, self.size, Side.BID, ask)
+                self.place_limit_order(self.symbol, size, Side.BID, ask)
             elif not buy_indicator and bid:
-                self.place_limit_order(self.symbol, self.size, Side.ASK, bid)
+                self.place_limit_order(self.symbol, size, Side.ASK, bid)
 
     def receive_message(
         self, current_time: NanosecondTime, sender_id: int, message: Message
