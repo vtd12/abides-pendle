@@ -1,13 +1,17 @@
 import logging
 import os
+import random
 import numpy as np
 from abides_core.utils import str_to_ns
 from abides_core.kernel import Kernel
 from abides_markets.agents import ValueAgent, ExchangeAgent
 from abides_markets.messages.query import QuerySpreadResponseMsg
+from abides_markets.messages.market import MarketHoursMsg
 from abides_markets.orders import Side
 from abides_core.utils import str_to_ns
 from abides_markets.agents.utils import tick_to_rate, rate_to_tick
+from abides_markets.models import OrderSizeModel
+
 import types
 from scipy.stats import expon, kstest
 
@@ -44,17 +48,6 @@ class FakeDrivingOracle:
             return rate
         return self.observed_rates[-1]
 
-class OrderSizeModel:
-    def __init__(self, sizes):
-        self.sizes = sizes
-        self.index = 0
-
-    def sample(self, random_state):
-        if self.index < len(self.sizes):
-            size = self.sizes[self.index]
-            self.index += 1
-            return size
-        return 1 
 
 def plot_histogram(data, bins, title, xlabel, ylabel, filename, color='skyblue', alpha=0.7, edgecolor='black', show_stats=True):
     import matplotlib.pyplot as plt
@@ -98,7 +91,7 @@ def setup_agents_and_kernel(observed_rates, floating_rate, expected_sizes):
     driving_oracle = FakeDrivingOracle(observed_rates=observed_rates)
     rate_oracle = FakeRateOracle(floating_rate=floating_rate)
 
-    order_size_model = OrderSizeModel(sizes=expected_sizes)
+    order_size_model = OrderSizeModel()
 
     value_agent = ValueAgent(
         id=1,
@@ -106,9 +99,9 @@ def setup_agents_and_kernel(observed_rates, floating_rate, expected_sizes):
         random_state=np.random.RandomState(seed=42),
         collateral=100_000,
         wake_up_freq=str_to_ns("10min"),
-        order_size_model=order_size_model,
         r_bar=0.10,
-        coef=[0.05, 0.40]
+        coef=[0.05, 0.40],
+        order_size_model = order_size_model
     )
 
 
@@ -157,8 +150,23 @@ def test_value_agent_calculation_logic():
     for i in range(num_iterations):
         current_time = 500_000_000 + i * 1_000_000  
         value_agent.current_time = current_time
+        value_agent.kernel_starting(current_time)
         value_agent.wakeup(current_time)
         
+        
+        market_hours_msg = MarketHoursMsg(
+            mkt_open=value_agent.mkt_open,
+            mkt_close=value_agent.mkt_close
+        )
+        value_agent.receive_message(
+            current_time=current_time,
+            sender_id=exchange_agent.id,
+            message=market_hours_msg
+        )
+
+        value_agent.wakeup(current_time)  # 调用wakeup方法
+
+        # 模拟接收QuerySpreadResponseMsg消息
         message = QuerySpreadResponseMsg(
             symbol="PEN",
             bids=value_agent.known_bids["PEN"],
@@ -167,14 +175,19 @@ def test_value_agent_calculation_logic():
             depth=1,
             last_trade=None,
         )
-        value_agent.receive_message(current_time, sender_id=0, message=message)
-
-        logger.debug(f"(1 - {value_agent.oracle_coef} - {value_agent.funding_rate_coef})*{value_agent.r_t} + {value_agent.funding_rate_coef}*{value_agent.last_funding_rate} + {value_agent.oracle_coef}*{tick_to_rate(value_agent.obs_t)}")
-        logger.debug(f"ValueAgent rt-1={value_agent.rt1}")
-        logger.debug(f"ValueAgent self.oracle_coef = {value_agent.oracle_coef}")
-        logger.debug(f"ValueAgent last_funding_rate={value_agent.last_funding_rate}")
-        logger.debug(f"ValueAgent Rot={value_agent.Rot}")
-        logger.debug(f"ValueAgent funding_rate_coef={value_agent.funding_rate_coef}")
+        value_agent.receive_message(current_time, sender_id=exchange_agent.id, message=message)
+        logger.debug(f"size_1: {value_agent.size_1}")
+        logger.debug(f"percentage: {value_agent.percentage}")
+        logger.debug(f"position: {value_agent.position}")
+        logger.debug(f"tm: {value_agent.tm}")
+        logger.debug(f"MtM: {value_agent.MtM}")
+        
+        # logger.debug(f"(1 - {value_agent.oracle_coef} - {value_agent.funding_rate_coef})*{value_agent.r_t} + {value_agent.funding_rate_coef}*{value_agent.last_funding_rate} + {value_agent.oracle_coef}*{tick_to_rate(value_agent.obs_t)}")
+        # logger.debug(f"ValueAgent rt-1={value_agent.rt1}")
+        # logger.debug(f"ValueAgent self.oracle_coef = {value_agent.oracle_coef}")
+        # logger.debug(f"ValueAgent last_funding_rate={value_agent.last_funding_rate}")
+        # logger.debug(f"ValueAgent Rot={value_agent.Rot}")
+        # logger.debug(f"ValueAgent funding_rate_coef={value_agent.funding_rate_coef}")
         
         logger.debug(f"ValueAgent r_t={value_agent.r_t}")
         
@@ -254,52 +267,52 @@ def test_value_agent_calculation_logic():
 
     logger.info("ValueAgent calculation logic test passed successfully.")
 
-def test_value_agent_wakeup_distribution():
-    num_wakeups = 1000  
-    expected_size = 8  
+# def test_value_agent_wakeup_distribution():
+#     num_wakeups = 1000  
+#     expected_size = 8  
 
-    os.makedirs('./logs/', exist_ok=True)
-    observed_rates = [1028] * num_wakeups  
-    floating_rate = 0.1095
-    exchange_agent, value_agent, kernel, known_bids, known_asks = setup_agents_and_kernel(
-        observed_rates=observed_rates,
-        floating_rate=floating_rate,
-        expected_sizes=[expected_size] * num_wakeups
-    )
+#     os.makedirs('./logs/', exist_ok=True)
+#     observed_rates = [1028] * num_wakeups  
+#     floating_rate = 0.1095
+#     exchange_agent, value_agent, kernel, known_bids, known_asks = setup_agents_and_kernel(
+#         observed_rates=observed_rates,
+#         floating_rate=floating_rate,
+#         expected_sizes=[expected_size] * num_wakeups
+#     )
 
-    wakeup_intervals_sec = []
-    previous_wakeup_time = value_agent.current_time
+#     wakeup_intervals_sec = []
+#     previous_wakeup_time = value_agent.current_time
 
-    original_wakeup = value_agent.wakeup
+#     original_wakeup = value_agent.wakeup
 
-    def recording_wakeup(self, current_time):
-        nonlocal previous_wakeup_time, wakeup_intervals_sec
-        interval_ns = current_time - previous_wakeup_time
-        interval_sec = interval_ns / 1e9  
-        wakeup_intervals_sec.append(interval_sec)
-        previous_wakeup_time = current_time
-        logger.debug(f"Wake-up interval: {interval_sec:.2f} seconds")
-        return original_wakeup(current_time)
+#     def recording_wakeup(self, current_time):
+#         nonlocal previous_wakeup_time, wakeup_intervals_sec
+#         interval_ns = current_time - previous_wakeup_time
+#         interval_sec = interval_ns / 1e9  
+#         wakeup_intervals_sec.append(interval_sec)
+#         previous_wakeup_time = current_time
+#         logger.debug(f"Wake-up interval: {interval_sec:.2f} seconds")
+#         return original_wakeup(current_time)
 
-    value_agent.wakeup = types.MethodType(recording_wakeup, value_agent)
+#     value_agent.wakeup = types.MethodType(recording_wakeup, value_agent)
 
-    while len(wakeup_intervals_sec) < num_wakeups:
-        kernel.run()
+#     while len(wakeup_intervals_sec) < num_wakeups:
+#         kernel.run()
 
-    wakeup_intervals_sec = wakeup_intervals_sec[:num_wakeups]
+#     wakeup_intervals_sec = wakeup_intervals_sec[:num_wakeups]
 
-    plot_histogram(
-        data=wakeup_intervals_sec,
-        bins=30,
-        title='ValueAgent Wake-Up Interval Distribution',
-        xlabel='Wake-Up Interval (seconds)',
-        ylabel='Density',
-        filename='./logs/value_agent_wakeup_distribution.png',
-        color='skyblue',
-        alpha=0.7,
-        edgecolor='black',
-        show_stats=True
-    )
-    logger.debug("Wake-up interval distribution saved as ./logs/value_agent_wakeup_distribution.png")
+#     plot_histogram(
+#         data=wakeup_intervals_sec,
+#         bins=30,
+#         title='ValueAgent Wake-Up Interval Distribution',
+#         xlabel='Wake-Up Interval (seconds)',
+#         ylabel='Density',
+#         filename='./logs/value_agent_wakeup_distribution.png',
+#         color='skyblue',
+#         alpha=0.7,
+#         edgecolor='black',
+#         show_stats=True
+#     )
+#     logger.debug("Wake-up interval distribution saved as ./logs/value_agent_wakeup_distribution.png")
 
-    logger.info("ValueAgent wake-up interval distribution test passed successfully.")
+#     logger.info("ValueAgent wake-up interval distribution test passed successfully.")

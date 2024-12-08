@@ -81,7 +81,7 @@ class ValueAgent(TradingAgent):
                 self.trading = True
 
                 # Time to start trading!
-                logger.debug("{} is ready to start trading now.", self.name)
+                logger.debug("%s is ready to start trading now.", self.name)
 
         # Steady state wakeup behavior starts here.
 
@@ -113,7 +113,7 @@ class ValueAgent(TradingAgent):
             self.current_time,
             random_state=self.random_state,
         )
-        last_funding_rate = self.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
+        last_funding_rate = self.kernel.rate_oracle.get_floating_rate(self.current_time)/self.kernel.rate_normalizer
 
         self.r_t = (1 - self.oracle_coef - self.funding_rate_coef)*self.r_t + self.funding_rate_coef*last_funding_rate + self.oracle_coef*tick_to_rate(obs_t)
         # self.logEvent("NEW ESTIMATE", self.r_t)
@@ -149,10 +149,13 @@ class ValueAgent(TradingAgent):
             p = rate_to_tick(r_t)
 
         # Place the order
-        percentage = self.order_size_model.sample(random_state=self.random_state)
+        percentage = self.order_size_model.sample(self.random_state) # 0.16294609183598846
+        self.percentage = percentage
         MtM = self.mark_to_market()
+        self.MtM = MtM
         size = int(percentage*MtM/(0.05*self.n_payment*self.rate_normalizer))
-
+        self.size_1 = size
+        self.tm = self.n_payment*self.rate_normalizer
         side = Side.BID if buy == 1 else Side.ASK
 
         if size > 0:
