@@ -1,9 +1,16 @@
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 
 from abides_markets.rate_oracle import ConstantOracle
 from abides_markets.rate_oracle import BTCOracle
+from abides_markets.driving_oracle import ManualOracle, LinearOracle
+from abides_markets.agents import ValueAgent
+
+from abides_core import Kernel
+from abides_core.utils import datetime_str_to_ns, str_to_ns
 from abides_markets.driving_oracle import ManualOracle, LinearOracle
 from abides_markets.agents import ValueAgent
 
@@ -21,6 +28,9 @@ def test_const_oracle():
 
 def test_BTC_oracle():
     oracle = BTCOracle()
+    assert round(oracle.get_floating_rate(1_673_222_400_003_000_001) - 5.796000e-05, 10) == 0
+    assert oracle.get_floating_rate(1_675_238_400_000_000_000) == 0.0001
+    
     assert round(oracle.get_floating_rate(1_673_222_400_003_000_001) - 5.796000e-05, 10) == 0
     assert oracle.get_floating_rate(1_675_238_400_000_000_000) == 0.0001
     
@@ -56,7 +66,7 @@ def test_manual_oracle():
     plt.plot(X, observed_price, label='Noisy observation from Oracle', linewidth=1)
     plt.legend()
 
-    plt.savefig('log/manual_oracle_plot.png')
+    plt.savefig('manual_oracle_plot.png')
 
 def test_linear_oracle():
     MKT_OPEN = int(pd.to_datetime("20230101").to_datetime64())
@@ -91,7 +101,7 @@ def test_linear_oracle():
     plt.plot(X, observed_price, label='Noisy observation from Oracle', linewidth=1)
     plt.legend()
 
-    plt.savefig('log/linear_oracle_plot.png')
+    plt.savefig('linear_oracle_plot.png')
 
     ##
 
