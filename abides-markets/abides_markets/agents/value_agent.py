@@ -81,7 +81,7 @@ class ValueAgent(TradingAgent):
                 self.trading = True
 
                 # Time to start trading!
-                logger.debug("{} is ready to start trading now.", self.name)
+                logger.debug("%s is ready to start trading now.", self.name)
 
         # Steady state wakeup behavior starts here.
 

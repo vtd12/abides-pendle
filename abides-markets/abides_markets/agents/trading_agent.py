@@ -1357,3 +1357,6 @@ class TradingAgent(FinancialAgent):
         self.last_R1 = self.R1()
         self.last_R2 = self.R2()
         self.logEvent("METRIC", [self.position['SIZE'], self.last_R1, self.last_R2])
+        
+    def get_wake_frequency(self) -> NanosecondTime:
+        return self.random_state.randint(low=0, high=100)
