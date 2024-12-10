@@ -216,13 +216,18 @@ def get_imbalance(
     
 # PENDLE
 def tick_to_rate(tick_index: int) -> float:
+    '''
+    Return the rate corresponding to the tick, up date 4 pts decimal. 
+    Example: Tick 1000 -> 0.1051
+    Tick 1 -> 0.0001
+    '''
     if tick_index >= 0:
-        return (1.0001)**tick_index - 1
+        return round((1.0001)**tick_index - 1, 4)
     else:
-        return 1 - (1.0001)**(-tick_index)
+        return -tick_to_rate(-tick_index)
 
 def rate_to_tick(rate: float) -> int:
     if rate >= 0:
-        return float(round(np.log(1+rate)/np.log(1.0001),6))
+        return int(round(np.log(1+rate)/np.log(1.0001)))
     else:
-        return - float(round(np.log(1-rate)/np.log(1.0001),6))
+        return - int(round(np.log(1-rate)/np.log(1.0001)))

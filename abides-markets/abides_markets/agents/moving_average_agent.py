@@ -88,7 +88,7 @@ class MovingAverageAgent(TradingAgent):
             price_cents = int(round(price * 100))
             assert isinstance(price_cents, int), f"price_cents should be int, got {type(price_cents)}"
             self.place_limit_order(self.symbol, self.size, order_side, price_cents)
-            logger.info(f"{self.name} placed {action.upper()} order at ${price:.2f} for size {self.size}")
+            # logger.info(f"{self.name} placed {action.upper()} order at ${price:.2f} for size {self.size}")
             if self.test_mode:
                 self.orders_placed.append({
                     "time": self.current_time,

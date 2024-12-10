@@ -31,9 +31,6 @@ def test_BTC_oracle():
     assert round(oracle.get_floating_rate(1_673_222_400_003_000_001) - 5.796000e-05, 10) == 0
     assert oracle.get_floating_rate(1_675_238_400_000_000_000) == 0.0001
     
-    assert round(oracle.get_floating_rate(1_673_222_400_003_000_001) - 5.796000e-05, 10) == 0
-    assert oracle.get_floating_rate(1_675_238_400_000_000_000) == 0.0001
-    
     assert True
 
 def test_manual_oracle():
