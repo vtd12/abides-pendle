@@ -11,20 +11,20 @@ logger = logging.getLogger(__name__)
 
 class FakeOrderBook:
     def __init__(self):
-        self.last_twap = -3029.555281  # Example value
+        self.last_twap = -3029.555281
 
 class FakeRateOracle:
     def __init__(self):
         pass
     
     def get_floating_rate(self, current_time: NanosecondTime) -> float:
-        return -0.0003231358432291831  # Example value
+        return -0.0003231358432291831 
 
 def test_trading_agent_calculate():
     logger.debug("Starting test_trading_agent_calculate")
 
     mkt_open = 0
-    mkt_close = 365 * str_to_ns("1d")  # 1 year in nanoseconds
+    mkt_close = 365 * str_to_ns("1d")  
     exchange_agent = ExchangeAgent(
         id=1,
         mkt_open=mkt_open,
@@ -70,11 +70,7 @@ def test_trading_agent_calculate():
     unhealthy_agent.position_updated()
 
     mark_to_market = unhealthy_agent.mark_to_market(unhealthy_agent.position)
-    logger.debug(f"Agent's value4log : {unhealthy_agent.value4log}")
-    logger.debug(f"Agent's market_tick4log : {unhealthy_agent.mtr4log}")
-    logger.debug(f"Agent's tick_to_rate(market_tick)4log : {unhealthy_agent.mt4log}")
-    logger.debug(f"Agent's fixrate4log : {unhealthy_agent.fixrate4log}")
-    logger.debug(f"Agent's size4log : {unhealthy_agent.size4log}")
+    
     expected_mtm = 3.670
     assert round(mark_to_market, 3) == expected_mtm, f"Expected mark to market to be {expected_mtm}, got {mark_to_market}"
     logger.debug(f"Agent's mark to market: {mark_to_market}")
