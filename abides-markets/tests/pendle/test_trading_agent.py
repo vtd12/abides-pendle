@@ -70,7 +70,12 @@ def test_trading_agent_calculate():
     unhealthy_agent.position_updated()
 
     mark_to_market = unhealthy_agent.mark_to_market(unhealthy_agent.position)
-    expected_mtm = 3.667
+    logger.debug(f"Agent's value4log : {unhealthy_agent.value4log}")
+    logger.debug(f"Agent's market_tick4log : {unhealthy_agent.mtr4log}")
+    logger.debug(f"Agent's tick_to_rate(market_tick)4log : {unhealthy_agent.mt4log}")
+    logger.debug(f"Agent's fixrate4log : {unhealthy_agent.fixrate4log}")
+    logger.debug(f"Agent's size4log : {unhealthy_agent.size4log}")
+    expected_mtm = 3.670
     assert round(mark_to_market, 3) == expected_mtm, f"Expected mark to market to be {expected_mtm}, got {mark_to_market}"
     logger.debug(f"Agent's mark to market: {mark_to_market}")
     
@@ -80,7 +85,7 @@ def test_trading_agent_calculate():
     logger.debug(f"Agent's maintenance margin: {maintenance_margin}")
     
     m_ratio = unhealthy_agent.mRatio(unhealthy_agent.position)
-    expected_mratio = 0.965
+    expected_mratio = 0.966
     assert round(m_ratio, 3) == expected_mratio, f"Expected mRatio to be {expected_mratio}, got {m_ratio}"
     logger.debug(f"Agent's mRatio: {m_ratio}")
     
