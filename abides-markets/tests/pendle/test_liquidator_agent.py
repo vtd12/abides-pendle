@@ -1,4 +1,3 @@
-from math import e
 import pytest
 import logging
 import numpy as np

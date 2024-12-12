@@ -249,15 +249,17 @@ def test_value_agent_wakeup_distribution():
         interval = value_agent.get_wake_frequency()
         wake_intervals.append(interval)
 
+    wake_intervals_seconds = [wi / 1e9 for wi in wake_intervals]
+
     plt.figure(figsize=(10, 6))
-    n, bins, patches = plt.hist(wake_intervals, bins=50, alpha=0.7, color='skyblue', edgecolor='black', density=True)
+    n, bins, patches = plt.hist(wake_intervals_seconds, bins=50, alpha=0.7, color='skyblue', edgecolor='black', density=True)
     plt.title('ValueAgent Wakeup Interval Distribution', fontsize=16)
-    plt.xlabel('Interval (ns)', fontsize=14)
+    plt.xlabel('Interval (s)', fontsize=14)
     plt.ylabel('Probability Density', fontsize=14)
     plt.grid(True)
 
-    mean = np.mean(wake_intervals)
-    plt.axvline(mean, color='red', linestyle='dashed', linewidth=1.5, label=f'Mean: {mean:.2f}')
+    mean = np.mean(wake_intervals_seconds)
+    plt.axvline(mean, color='red', linestyle='dashed', linewidth=1.5, label=f'Mean: {mean:.2f} s')
     plt.legend()
 
     plt.tight_layout()
@@ -265,4 +267,3 @@ def test_value_agent_wakeup_distribution():
     plt.close()
 
     logger.info("Wakeup interval distribution test completed. Check the generated plot.")
-
