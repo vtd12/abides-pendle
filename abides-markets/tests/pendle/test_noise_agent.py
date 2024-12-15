@@ -1,3 +1,5 @@
+from re import L
+from py import log
 import pytest
 import logging
 import numpy as np
@@ -17,7 +19,8 @@ from abides_core.kernel import Kernel
 from abides_markets.order_book import OrderBook
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
 
 
 class FakeRateOracle:
@@ -89,14 +92,13 @@ def test_noise_agent_algorithm():
     noise_agent.kernel = kernel
     exchange_agent.kernel = kernel
 
-    noise_agent.mkt_open = 0
+    noise_agent.mkt_open = 1
     noise_agent.mkt_close = 365 * str_to_ns("1d")
-    noise_agent.current_time = 0
+    noise_agent.current_time = 2
     noise_agent.exchange_id = 0
 
     noise_agent.known_bids = {"PEN": [(1000, 1090001)]} 
     noise_agent.known_asks = {"PEN": [(1010, 1090142)]}
-    orderl = []
     noise_agent.order_size_model = OrderSizeModel()
 
     for i in range(num_iterations):
@@ -104,7 +106,8 @@ def test_noise_agent_algorithm():
         noise_agent.current_time = current_time
         noise_agent.kernel_starting(current_time)
         noise_agent.wakeup(current_time)
-
+        logger.debug(f"wake_up_success = {noise_agent.wake_up_success}")
+        logger.debug(f"noise_agent.state = {noise_agent.state}")
         market_hours_msg = MarketHoursMsg(
             mkt_open=noise_agent.mkt_open,
             mkt_close=noise_agent.mkt_close
@@ -114,34 +117,27 @@ def test_noise_agent_algorithm():
             sender_id=exchange_agent.id,
             message=market_hours_msg
         )
-        
-
+        # agent state 
+        logger.debug(f"noise_agent.state = {noise_agent.state}")
         message = QuerySpreadResponseMsg(
             symbol="PEN",
             bids=noise_agent.known_bids["PEN"],
             asks=noise_agent.known_asks["PEN"],
             mkt_closed=False,
             depth=1,
-            last_trade=None,
+            last_trade=1005,
         )
         noise_agent.receive_message(current_time, sender_id=0, message=message)
         
-        logger.debug(f"noise_agent.n_payment = {noise_agent.n_payment}")
-        logger.debug(f"noise_agent.rate_normalizer = {noise_agent.rate_normalizer}")
-        logger.debug(f"noise_agent.mark_to_market() = {noise_agent.mark_to_market()}")
-        logger.debug(f"noise_agent.order_size_model.sample() = {noise_agent.order_size_model.sample(random_state=noise_agent.random_state)}")    
-        size = int(noise_agent.order_size_model.sample(random_state=noise_agent.random_state) * noise_agent.mark_to_market() / (0.05 * noise_agent.n_payment * noise_agent.rate_normalizer))
-        logger.debug(f"size = {size}")
+        logger.debug(f"noise_agent.size = {noise_agent.size}")
         
         wakeup_times.append(current_time)
-        noise_agent.place_limit_order('PEN', size, Side.BID, 1005)
+
         logger.debug(f"orders = {noise_agent.orders}")
-        orderl.append(noise_agent.orders)
-        logger.debug(f"len(noise_agent.orders) = {len(orderl)}")
+        logger.debug(f"len(noise_agent.orders) = {len(noise_agent.orders)}")
         
-        if len(orderl) > 0:
+        if len(noise_agent.orders) > 0:
             order = next(iter(noise_agent.orders.values()))
-            logger.debug(f"Order: {order}")
             order_sizes.append(order.quantity)
             noise_agent.orders.clear()
 
