@@ -552,11 +552,6 @@ class Kernel:
         )
         self.custom_state["agents"] = self.agents
 
-        # Agents will request the Kernel to serialize their agent logs, usually
-        # during kernel_terminating, but the Kernel must write out the summary
-        # log itself.
-        self.write_summary_log()
-
         # This should perhaps be elsewhere, as it is explicitly financial, but it
         # is convenient to have a quick summary of the results for now.
         logger.info("Mean ending valuation (PnL) by agent type:")
@@ -860,17 +855,6 @@ class Kernel:
                 "Event": event,
             }
         )
-
-    def write_summary_log(self) -> None:
-        path = os.path.join(".", "log", self.log_dir)
-        file = "summary_log.bz2"
-
-        if not os.path.exists(path):
-            os.makedirs(path)
-
-        df_log = pd.DataFrame(self.summary_log)
-
-        df_log.to_pickle(os.path.join(path, file), compression="bz2")
 
     def update_agent_state(self, agent_id: int, state: Any) -> None:
         """

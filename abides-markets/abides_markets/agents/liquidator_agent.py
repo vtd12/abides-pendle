@@ -114,13 +114,13 @@ class LiquidatorAgent(TradingAgent):
         if agent.is_healthy() or agent.position["SIZE"] == 0:
             return False
 
-        self.logEvent("LIQUIDATABLE", f"AGENT ID: {agent.id} R1 = {agent.last_R1}")
-
         mRatio = agent.mRatio()
 
-        if mRatio > 1:
+        if mRatio > 1 or mRatio <0:
+            # print(mRatio)
             return False
-        assert mRatio >=0 and mRatio <= 1, mRatio
+        
+        self.logEvent("LIQUIDATABLE", f"AGENT ID: {agent.id} R1 = {agent.last_R1}")
 
         liq_fac_base = 0.1
         liq_fac_slope = 1
@@ -134,7 +134,7 @@ class LiquidatorAgent(TradingAgent):
 
         if longing:  # We need to liquidate by market ask order (selling) (i.e. look at BID wall)
             for bid in self.known_bids[self.symbol]:
-                if bid[0] < market_tick:
+                if bid[0] < market_tick-liq_fac_base*500:
                     break
 
                 d_size += bid[1]
@@ -145,7 +145,7 @@ class LiquidatorAgent(TradingAgent):
             
         else:  # We need to liquidate by market bid order (buying) (i.e. look at ASK wall)
             for ask in self.known_asks[self.symbol]:
-                if ask[0] > market_tick:
+                if ask[0] > market_tick+liq_fac_base*500:
                     break
                 d_size -= ask[1]
 

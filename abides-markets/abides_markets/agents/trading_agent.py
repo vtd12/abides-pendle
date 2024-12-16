@@ -1261,6 +1261,7 @@ class TradingAgent(FinancialAgent):
         return MtM/self.maintainance_margin(position["SIZE"])
 
     def is_healthy(self):
+        # Based only on last_R1 for quick query. It might be wrong, but it's often correct.
         if self.position["SIZE"] == 0 or self.n_payment == 0:
             return True if self.position["COLLATERAL"]>=0 else False
         

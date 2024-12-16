@@ -81,7 +81,6 @@ def plot_price_ma_orders(title, prices, short_window, long_window, orders, filen
     plt.savefig(filename, dpi=300)
     plt.close()
 
-@pytest.mark.slow
 def test_moving_average_agent_momentum():
     num_iterations = 500
     wakeup_times = []
@@ -173,7 +172,6 @@ def test_moving_average_agent_momentum():
     assert len(wakeup_times) == num_iterations
     logger.info("MovingAverageAgent test completed successfully. Check ./logs_ma/ for results.")
 
-@pytest.mark.slow
 def test_moving_average_agent_mean_reversion():
     num_iterations = 500
     wakeup_times = []

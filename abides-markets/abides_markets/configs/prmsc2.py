@@ -1,7 +1,7 @@
 # PRMSC-2 (Pendle Reference Market Simulation Configuration):
 # - 1       Exchange Agent
-# - 1000      Noise Agents
-# - 100       Value Agents
+# - 20_000      Noise Agents
+# - [100, 5, 5]       Value Agents
 # - 2       Market Maker Agents
 # - 1       Liquidator Agents
 
@@ -105,9 +105,10 @@ def build_config(
     }
 
     driving_oracle = LinearOracle(MKT_OPEN, MKT_CLOSE, symbols, [{"time": 0, "mag": 1000},
+                                                                 {"time": 5/90, "mag": 2000},
                                                                 # {"time": 1/31, "mag": 3000},
                                                                 # {"time": 2/31, "mag": 0},
-                                                                {"time": 10/90, "mag": 2000}
+                                                                {"time": 10/90, "mag": 1000}
                                                                 ])
 
     # Agent configuration

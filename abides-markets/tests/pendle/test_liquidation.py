@@ -116,15 +116,16 @@ def test_liquidator():
     liquidator.known_bids[liquidator.symbol] = [
         [1100, 10],  
         [1000, 10],
-        [950, 10]
+        [950, 10],
+        [900, 10]
     ]
 
     # Liquidator is supposed to liquidate agent by taking (SIZE:20, FIXRATE:0.20) position
 
     liquidator.check_liquidate(dummy_agent, sell=False)
-    assert liquidator.position["SIZE"] == 20
+    assert liquidator.position["SIZE"] == 30
 
-    assert dummy_agent.position["SIZE"] == 80
+    assert dummy_agent.position["SIZE"] == 70
     # assert dummy_agent.position["COLLATERAL"] > 0
     # assert dummy_agent.position["COLLATERAL"] < 14
 
