@@ -59,9 +59,9 @@ The repo currently has the following available background Market Simulation Conf
 
 * PRMSC01: 1 Exchange Agent, 2 Market Maker Agent, 5 Value Agents, 10 Noise Agents, 1 Liquidator Agents (primarily for testing)
  
-* PRMSC02: 1 Exchange Agent, 2 Market Maker Agents, 100 Value Agents, 1000 Noise Agents, 1 Liquidator Agents. For details and modifications, go to `abides-markets/abides_markets/configs/prmsc2.py`.
+* PRMSC02: 1 Exchange Agent, 2 Market Maker Agents, 110 Value Agents divided to 3 types, 20000 Noise Agents, 1 Liquidator Agents. For details and modifications, go to `abides-markets/abides_markets/configs/prmsc2.py`.
 
-The order size model: each order have notional size of $1M. 10% of the time, the order size gets higher, up to $10M. For details and modifications, go to `abides-markets/abides_markets/models/order_size_model.py`. 
+The order size model: each order have notional size of around 10% of the total value. For details and modifications, go to `abides-markets/abides_markets/models/order_size_model.py`. 
 
 There are 2 settings of driving oracle ready to be used. Details in `abides-markets/abides_markets/driving_oracle`.
 
